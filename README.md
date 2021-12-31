@@ -13,6 +13,7 @@ Features
  * SPAM users are tested against well-known services
    * [BotScout](https://botscout.com)
    * [FSpamlist](https://fspamlist.com)
+   * [ProjectHoneyPot](https://www.projecthoneypot.org)
    * [StopForumSpam](https://www.stopforumspam.com)
  * Each service is implemented as an internal plugin on its own, allowing for easy extension
  * Statistics for the last months are tracked for each service 
