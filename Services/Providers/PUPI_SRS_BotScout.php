@@ -36,11 +36,23 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractService
             throw new Exception('API Error: ' . substr($data, 2));
         }
 
-        if ($data[0] === 'Y') {
-            return true;
+        $dataExploded = explode('|', $data);
+
+        if ($dataExploded[0] === 'Y') {
+            // Allow up to 5 IP address reports
+            if ((int)$dataExploded[3] > 5) {
+                return true;
+            }
+
+            // Don't allow any email report
+            if ((int)$dataExploded[5] > 0) {
+                return true;
+            }
+
+            return false;
         }
 
-        if ($data[0] === 'N') {
+        if ($dataExploded[0] === 'N') {
             return false;
         }
 
