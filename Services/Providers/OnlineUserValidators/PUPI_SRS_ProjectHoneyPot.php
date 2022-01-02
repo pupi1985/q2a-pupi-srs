@@ -26,7 +26,7 @@ class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractOnlineUserValidator
         }
 
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            throw new Exception('Invalid IP address');
+            return false;
         }
 
         $reversedIp = array_reverse(explode('.', $ip));
