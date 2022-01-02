@@ -1,1456 +1,674 @@
-<?php
-/**
- * Copyright 2011 Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License. You may obtain
- * a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
- */
-
-if (!function_exists('curl_init')) {
-  throw new Exception('Facebook needs the CURL PHP extension.');
-}
-if (!function_exists('json_decode')) {
-  throw new Exception('Facebook needs the JSON PHP extension.');
-}
-
-/**
- * Thrown when an API call returns an exception.
- *
- * @author Naitik Shah <naitik@facebook.com>
- */
-class FacebookApiException extends Exception
-{
-  /**
-   * The result from the API server that represents the exception information.
-   */
-  protected $result;
-
-  /**
-   * Make a new API Exception with the given result.
-   *
-   * @param array $result The result from the API server
-   */
-  public function __construct($result) {
-    $this->result = $result;
-
-    $code = isset($result['error_code']) ? $result['error_code'] : 0;
-
-    if (isset($result['error_description'])) {
-      // OAuth 2.0 Draft 10 style
-      $msg = $result['error_description'];
-    } else if (isset($result['error']) && is_array($result['error'])) {
-      // OAuth 2.0 Draft 00 style
-      $msg = $result['error']['message'];
-    } else if (isset($result['error_msg'])) {
-      // Rest server style
-      $msg = $result['error_msg'];
-    } else {
-      $msg = 'Unknown Error. Check getResult()';
-    }
-
-    parent::__construct($msg, $code);
-  }
-
-  /**
-   * Return the associated result object returned by the API server.
-   *
-   * @return array The result from the API server
-   */
-  public function getResult() {
-    return $this->result;
-  }
-
-  /**
-   * Returns the associated type for the error. This will default to
-   * 'Exception' when a type is not available.
-   *
-   * @return string
-   */
-  public function getType() {
-    if (isset($this->result['error'])) {
-      $error = $this->result['error'];
-      if (is_string($error)) {
-        // OAuth 2.0 Draft 10 style
-        return $error;
-      } else if (is_array($error)) {
-        // OAuth 2.0 Draft 00 style
-        if (isset($error['type'])) {
-          return $error['type'];
-        }
-      }
-    }
-
-    return 'Exception';
-  }
-
-  /**
-   * To make debugging easier.
-   *
-   * @return string The string representation of the error
-   */
-  public function __toString() {
-    $str = $this->getType() . ': ';
-    if ($this->code != 0) {
-      $str .= $this->code . ': ';
-    }
-    return $str . $this->message;
-  }
-}
-
-/**
- * Provides access to the Facebook Platform.  This class provides
- * a majority of the functionality needed, but the class is abstract
- * because it is designed to be sub-classed.  The subclass must
- * implement the four abstract methods listed at the bottom of
- * the file.
- *
- * @author Naitik Shah <naitik@facebook.com>
- */
-abstract class BaseFacebook
-{
-  /**
-   * Version.
-   */
-  const VERSION = '3.2.2';
-
-  /**
-   * Signed Request Algorithm.
-   */
-  const SIGNED_REQUEST_ALGORITHM = 'HMAC-SHA256';
-
-  /**
-   * Default options for curl.
-   */
-  public static $CURL_OPTS = array(
-    CURLOPT_CONNECTTIMEOUT => 10,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT        => 60,
-    CURLOPT_USERAGENT      => 'facebook-php-3.2',
-  );
-
-  /**
-   * List of query parameters that get automatically dropped when rebuilding
-   * the current URL.
-   */
-  protected static $DROP_QUERY_PARAMS = array(
-    'code',
-    'state',
-    'signed_request',
-  );
-
-  /**
-   * Maps aliases to Facebook domains.
-   */
-  public static $DOMAIN_MAP = array(
-    'api'         => 'https://api.facebook.com/',
-    'api_video'   => 'https://api-video.facebook.com/',
-    'api_read'    => 'https://api-read.facebook.com/',
-    'graph'       => 'https://graph.facebook.com/',
-    'graph_video' => 'https://graph-video.facebook.com/',
-    'www'         => 'https://www.facebook.com/',
-  );
-
-  /**
-   * The Application ID.
-   *
-   * @var string
-   */
-  protected $appId;
-
-  /**
-   * The Application App Secret.
-   *
-   * @var string
-   */
-  protected $appSecret;
-
-  /**
-   * The ID of the Facebook user, or 0 if the user is logged out.
-   *
-   * @var integer
-   */
-  protected $user;
-
-  /**
-   * The data from the signed_request token.
-   */
-  protected $signedRequest;
-
-  /**
-   * A CSRF state variable to assist in the defense against CSRF attacks.
-   */
-  protected $state;
-
-  /**
-   * The OAuth access token received in exchange for a valid authorization
-   * code.  null means the access token has yet to be determined.
-   *
-   * @var string
-   */
-  protected $accessToken = null;
-
-  /**
-   * Indicates if the CURL based @ syntax for file uploads is enabled.
-   *
-   * @var boolean
-   */
-  protected $fileUploadSupport = false;
-
-  /**
-   * Indicates if we trust HTTP_X_FORWARDED_* headers.
-   *
-   * @var boolean
-   */
-  protected $trustForwarded = false;
-
-  /**
-   * Initialize a Facebook Application.
-   *
-   * The configuration:
-   * - appId: the application ID
-   * - secret: the application secret
-   * - fileUpload: (optional) boolean indicating if file uploads are enabled
-   *
-   * @param array $config The application configuration
-   */
-  public function __construct($config) {
-    $this->setAppId($config['appId']);
-    $this->setAppSecret($config['secret']);
-    if (isset($config['fileUpload'])) {
-      $this->setFileUploadSupport($config['fileUpload']);
-    }
-    if (isset($config['trustForwarded']) && $config['trustForwarded']) {
-      $this->trustForwarded = true;
-    }
-    $state = $this->getPersistentData('state');
-    if (!empty($state)) {
-      $this->state = $state;
-    }
-  }
-
-  /**
-   * Set the Application ID.
-   *
-   * @param string $appId The Application ID
-   * @return BaseFacebook
-   */
-  public function setAppId($appId) {
-    $this->appId = $appId;
-    return $this;
-  }
-
-  /**
-   * Get the Application ID.
-   *
-   * @return string the Application ID
-   */
-  public function getAppId() {
-    return $this->appId;
-  }
-
-  /**
-   * Set the App Secret.
-   *
-   * @param string $apiSecret The App Secret
-   * @return BaseFacebook
-   * @deprecated
-   */
-  public function setApiSecret($apiSecret) {
-    $this->setAppSecret($apiSecret);
-    return $this;
-  }
-
-  /**
-   * Set the App Secret.
-   *
-   * @param string $appSecret The App Secret
-   * @return BaseFacebook
-   */
-  public function setAppSecret($appSecret) {
-    $this->appSecret = $appSecret;
-    return $this;
-  }
-
-  /**
-   * Get the App Secret.
-   *
-   * @return string the App Secret
-   * @deprecated
-   */
-  public function getApiSecret() {
-    return $this->getAppSecret();
-  }
-
-  /**
-   * Get the App Secret.
-   *
-   * @return string the App Secret
-   */
-  public function getAppSecret() {
-    return $this->appSecret;
-  }
-
-  /**
-   * Set the file upload support status.
-   *
-   * @param boolean $fileUploadSupport The file upload support status.
-   * @return BaseFacebook
-   */
-  public function setFileUploadSupport($fileUploadSupport) {
-    $this->fileUploadSupport = $fileUploadSupport;
-    return $this;
-  }
-
-  /**
-   * Get the file upload support status.
-   *
-   * @return boolean true if and only if the server supports file upload.
-   */
-  public function getFileUploadSupport() {
-    return $this->fileUploadSupport;
-  }
-
-  /**
-   * DEPRECATED! Please use getFileUploadSupport instead.
-   *
-   * Get the file upload support status.
-   *
-   * @return boolean true if and only if the server supports file upload.
-   */
-  public function useFileUploadSupport() {
-    return $this->getFileUploadSupport();
-  }
-
-  /**
-   * Sets the access token for api calls.  Use this if you get
-   * your access token by other means and just want the SDK
-   * to use it.
-   *
-   * @param string $access_token an access token.
-   * @return BaseFacebook
-   */
-  public function setAccessToken($access_token) {
-    $this->accessToken = $access_token;
-    return $this;
-  }
-
-  /**
-   * Extend an access token, while removing the short-lived token that might
-   * have been generated via client-side flow. Thanks to http://bit.ly/b0Pt0H
-   * for the workaround.
-   */
-  public function setExtendedAccessToken() {
-    try {
-      // need to circumvent json_decode by calling _oauthRequest
-      // directly, since response isn't JSON format.
-      $access_token_response = $this->_oauthRequest(
-        $this->getUrl('graph', '/oauth/access_token'),
-        $params = array(
-          'client_id' => $this->getAppId(),
-          'client_secret' => $this->getAppSecret(),
-          'grant_type' => 'fb_exchange_token',
-          'fb_exchange_token' => $this->getAccessToken(),
-        )
-      );
-    }
-    catch (FacebookApiException $e) {
-      // most likely that user very recently revoked authorization.
-      // In any event, we don't have an access token, so say so.
-      return false;
-    }
-
-    if (empty($access_token_response)) {
-      return false;
-    }
-
-    $response = json_decode($access_token_response);
-    if (!isset($response->access_token)) {
-      return false;
-    }
-
-    $this->destroySession();
-
-    $this->setPersistentData(
-      'access_token', $response->access_token
-    );
-    
-  }
-
-  /**
-   * Determines the access token that should be used for API calls.
-   * The first time this is called, $this->accessToken is set equal
-   * to either a valid user access token, or it's set to the application
-   * access token if a valid user access token wasn't available.  Subsequent
-   * calls return whatever the first call returned.
-   *
-   * @return string The access token
-   */
-  public function getAccessToken() {
-    if ($this->accessToken !== null) {
-      // we've done this already and cached it.  Just return.
-      return $this->accessToken;
-    }
-
-    // first establish access token to be the application
-    // access token, in case we navigate to the /oauth/access_token
-    // endpoint, where SOME access token is required.
-    $this->setAccessToken($this->getApplicationAccessToken());
-    $user_access_token = $this->getUserAccessToken();
-    if ($user_access_token) {
-      $this->setAccessToken($user_access_token);
-    }
-
-    return $this->accessToken;
-  }
-
-  /**
-   * Determines and returns the user access token, first using
-   * the signed request if present, and then falling back on
-   * the authorization code if present.  The intent is to
-   * return a valid user access token, or false if one is determined
-   * to not be available.
-   *
-   * @return string A valid user access token, or false if one
-   *                could not be determined.
-   */
-  protected function getUserAccessToken() {
-    // first, consider a signed request if it's supplied.
-    // if there is a signed request, then it alone determines
-    // the access token.
-    $signed_request = $this->getSignedRequest();
-    if ($signed_request) {
-      // apps.facebook.com hands the access_token in the signed_request
-      if (array_key_exists('oauth_token', $signed_request)) {
-        $access_token = $signed_request['oauth_token'];
-        $this->setPersistentData('access_token', $access_token);
-        return $access_token;
-      }
-
-      // the JS SDK puts a code in with the redirect_uri of ''
-      if (array_key_exists('code', $signed_request)) {
-        $code = $signed_request['code'];
-        if ($code && $code == $this->getPersistentData('code')) {
-          // short-circuit if the code we have is the same as the one presented
-          return $this->getPersistentData('access_token');
-        }
-
-        $access_token = $this->getAccessTokenFromCode($code, '');
-        if ($access_token) {
-          $this->setPersistentData('code', $code);
-          $this->setPersistentData('access_token', $access_token);
-          return $access_token;
-        }
-      }
-
-      // signed request states there's no access token, so anything
-      // stored should be cleared.
-      $this->clearAllPersistentData();
-      return false; // respect the signed request's data, even
-                    // if there's an authorization code or something else
-    }
-
-    $code = $this->getCode();
-    if ($code && $code != $this->getPersistentData('code')) {
-      $access_token = $this->getAccessTokenFromCode($code);
-      if ($access_token) {
-        $this->setPersistentData('code', $code);
-        $this->setPersistentData('access_token', $access_token);
-        return $access_token;
-      }
-
-      // code was bogus, so everything based on it should be invalidated.
-      $this->clearAllPersistentData();
-      return false;
-    }
-
-    // as a fallback, just return whatever is in the persistent
-    // store, knowing nothing explicit (signed request, authorization
-    // code, etc.) was present to shadow it (or we saw a code in $_REQUEST,
-    // but it's the same as what's in the persistent store)
-    return $this->getPersistentData('access_token');
-  }
-
-  /**
-   * Retrieve the signed request, either from a request parameter or,
-   * if not present, from a cookie.
-   *
-   * @return string the signed request, if available, or null otherwise.
-   */
-  public function getSignedRequest() {
-    if (!$this->signedRequest) {
-      if (!empty($_REQUEST['signed_request'])) {
-        $this->signedRequest = $this->parseSignedRequest(
-          $_REQUEST['signed_request']);
-      } else if (!empty($_COOKIE[$this->getSignedRequestCookieName()])) {
-        $this->signedRequest = $this->parseSignedRequest(
-          $_COOKIE[$this->getSignedRequestCookieName()]);
-      }
-    }
-    return $this->signedRequest;
-  }
-
-  /**
-   * Get the UID of the connected user, or 0
-   * if the Facebook user is not connected.
-   *
-   * @return string the UID if available.
-   */
-  public function getUser() {
-    if ($this->user !== null) {
-      // we've already determined this and cached the value.
-      return $this->user;
-    }
-
-    return $this->user = $this->getUserFromAvailableData();
-  }
-
-  /**
-   * Determines the connected user by first examining any signed
-   * requests, then considering an authorization code, and then
-   * falling back to any persistent store storing the user.
-   *
-   * @return integer The id of the connected Facebook user,
-   *                 or 0 if no such user exists.
-   */
-  protected function getUserFromAvailableData() {
-    // if a signed request is supplied, then it solely determines
-    // who the user is.
-    $signed_request = $this->getSignedRequest();
-    if ($signed_request) {
-      if (array_key_exists('user_id', $signed_request)) {
-        $user = $signed_request['user_id'];
-
-        if($user != $this->getPersistentData('user_id')){
-          $this->clearAllPersistentData();
-        }
-
-        $this->setPersistentData('user_id', $signed_request['user_id']);
-        return $user;
-      }
-
-      // if the signed request didn't present a user id, then invalidate
-      // all entries in any persistent store.
-      $this->clearAllPersistentData();
-      return 0;
-    }
-
-    $user = $this->getPersistentData('user_id', $default = 0);
-    $persisted_access_token = $this->getPersistentData('access_token');
-
-    // use access_token to fetch user id if we have a user access_token, or if
-    // the cached access token has changed.
-    $access_token = $this->getAccessToken();
-    if ($access_token &&
-        $access_token != $this->getApplicationAccessToken() &&
-        !($user && $persisted_access_token == $access_token)) {
-      $user = $this->getUserFromAccessToken();
-      if ($user) {
-        $this->setPersistentData('user_id', $user);
-      } else {
-        $this->clearAllPersistentData();
-      }
-    }
-
-    return $user;
-  }
-
-  /**
-   * Get a Login URL for use with redirects. By default, full page redirect is
-   * assumed. If you are using the generated URL with a window.open() call in
-   * JavaScript, you can pass in display=popup as part of the $params.
-   *
-   * The parameters:
-   * - redirect_uri: the url to go to after a successful login
-   * - scope: comma separated list of requested extended perms
-   *
-   * @param array $params Provide custom parameters
-   * @return string The URL for the login flow
-   */
-  public function getLoginUrl($params=array()) {
-    $this->establishCSRFTokenState();
-    $currentUrl = $this->getCurrentUrl();
-
-    // if 'scope' is passed as an array, convert to comma separated list
-    $scopeParams = isset($params['scope']) ? $params['scope'] : null;
-    if ($scopeParams && is_array($scopeParams)) {
-      $params['scope'] = implode(',', $scopeParams);
-    }
-
-    return $this->getUrl(
-      'www',
-      'dialog/oauth',
-      array_merge(array(
-                    'client_id' => $this->getAppId(),
-                    'redirect_uri' => $currentUrl, // possibly overwritten
-                    'state' => $this->state),
-                  $params));
-  }
-
-  /**
-   * Get a Logout URL suitable for use with redirects.
-   *
-   * The parameters:
-   * - next: the url to go to after a successful logout
-   *
-   * @param array $params Provide custom parameters
-   * @return string The URL for the logout flow
-   */
-  public function getLogoutUrl($params=array()) {
-    return $this->getUrl(
-      'www',
-      'logout.php',
-      array_merge(array(
-        'next' => $this->getCurrentUrl(),
-        'access_token' => $this->getUserAccessToken(),
-      ), $params)
-    );
-  }
-
-  /**
-   * Get a login status URL to fetch the status from Facebook.
-   *
-   * The parameters:
-   * - ok_session: the URL to go to if a session is found
-   * - no_session: the URL to go to if the user is not connected
-   * - no_user: the URL to go to if the user is not signed into facebook
-   *
-   * @param array $params Provide custom parameters
-   * @return string The URL for the logout flow
-   */
-  public function getLoginStatusUrl($params=array()) {
-    return $this->getUrl(
-      'www',
-      'extern/login_status.php',
-      array_merge(array(
-        'api_key' => $this->getAppId(),
-        'no_session' => $this->getCurrentUrl(),
-        'no_user' => $this->getCurrentUrl(),
-        'ok_session' => $this->getCurrentUrl(),
-        'session_version' => 3,
-      ), $params)
-    );
-  }
-
-  /**
-   * Make an API call.
-   *
-   * @return mixed The decoded response
-   */
-  public function api(/* polymorphic */) {
-    $args = func_get_args();
-    if (is_array($args[0])) {
-      return $this->_restserver($args[0]);
-    } else {
-      return call_user_func_array(array($this, '_graph'), $args);
-    }
-  }
-
-  /**
-   * Constructs and returns the name of the cookie that
-   * potentially houses the signed request for the app user.
-   * The cookie is not set by the BaseFacebook class, but
-   * it may be set by the JavaScript SDK.
-   *
-   * @return string the name of the cookie that would house
-   *         the signed request value.
-   */
-  protected function getSignedRequestCookieName() {
-    return 'fbsr_'.$this->getAppId();
-  }
-
-  /**
-   * Constructs and returns the name of the coookie that potentially contain
-   * metadata. The cookie is not set by the BaseFacebook class, but it may be
-   * set by the JavaScript SDK.
-   *
-   * @return string the name of the cookie that would house metadata.
-   */
-  protected function getMetadataCookieName() {
-    return 'fbm_'.$this->getAppId();
-  }
-
-  /**
-   * Get the authorization code from the query parameters, if it exists,
-   * and otherwise return false to signal no authorization code was
-   * discoverable.
-   *
-   * @return mixed The authorization code, or false if the authorization
-   *               code could not be determined.
-   */
-  protected function getCode() {
-    if (isset($_REQUEST['code'])) {
-      if ($this->state !== null &&
-          isset($_REQUEST['state']) &&
-          $this->state === $_REQUEST['state']) {
-
-        // CSRF state has done its job, so clear it
-        $this->state = null;
-        $this->clearPersistentData('state');
-        return $_REQUEST['code'];
-      } else {
-        self::errorLog('CSRF state token does not match one provided.');
-        return false;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Retrieves the UID with the understanding that
-   * $this->accessToken has already been set and is
-   * seemingly legitimate.  It relies on Facebook's Graph API
-   * to retrieve user information and then extract
-   * the user ID.
-   *
-   * @return integer Returns the UID of the Facebook user, or 0
-   *                 if the Facebook user could not be determined.
-   */
-  protected function getUserFromAccessToken() {
-    try {
-      $user_info = $this->api('/me');
-      return $user_info['id'];
-    } catch (FacebookApiException $e) {
-      return 0;
-    }
-  }
-
-  /**
-   * Returns the access token that should be used for logged out
-   * users when no authorization code is available.
-   *
-   * @return string The application access token, useful for gathering
-   *                public information about users and applications.
-   */
-  protected function getApplicationAccessToken() {
-    return $this->appId.'|'.$this->appSecret;
-  }
-
-  /**
-   * Lays down a CSRF state token for this process.
-   *
-   * @return void
-   */
-  protected function establishCSRFTokenState() {
-    if ($this->state === null) {
-      $this->state = md5(uniqid(mt_rand(), true));
-      $this->setPersistentData('state', $this->state);
-    }
-  }
-
-  /**
-   * Retrieves an access token for the given authorization code
-   * (previously generated from www.facebook.com on behalf of
-   * a specific user).  The authorization code is sent to graph.facebook.com
-   * and a legitimate access token is generated provided the access token
-   * and the user for which it was generated all match, and the user is
-   * either logged in to Facebook or has granted an offline access permission.
-   *
-   * @param string $code An authorization code.
-   * @return mixed An access token exchanged for the authorization code, or
-   *               false if an access token could not be generated.
-   */
-  protected function getAccessTokenFromCode($code, $redirect_uri = null) {
-    if (empty($code)) {
-      return false;
-    }
-
-    if ($redirect_uri === null) {
-      $redirect_uri = $this->getCurrentUrl();
-    }
-
-    try {
-      // need to circumvent json_decode by calling _oauthRequest
-      // directly, since response isn't JSON format.
-      $access_token_response =
-        $this->_oauthRequest(
-          $this->getUrl('graph', '/oauth/access_token'),
-          $params = array('client_id' => $this->getAppId(),
-                          'client_secret' => $this->getAppSecret(),
-                          'redirect_uri' => $redirect_uri,
-                          'code' => $code));
-    } catch (FacebookApiException $e) {
-      // most likely that user very recently revoked authorization.
-      // In any event, we don't have an access token, so say so.
-      return false;
-    }
-
-    if (empty($access_token_response)) {
-      return false;
-    }
-
-   $response = json_decode($access_token_response);
-    if (!isset($response->access_token)) {
-      return false;
-    }
-    return $response->access_token;
-
-  }
-
-  /**
-   * Invoke the old restserver.php endpoint.
-   *
-   * @param array $params Method call object
-   *
-   * @return mixed The decoded response object
-   * @throws FacebookApiException
-   */
-  protected function _restserver($params) {
-    // generic application level parameters
-    $params['api_key'] = $this->getAppId();
-    $params['format'] = 'json-strings';
-
-    $result = json_decode($this->_oauthRequest(
-      $this->getApiUrl($params['method']),
-      $params
-    ), true);
-
-    // results are returned, errors are thrown
-    if (is_array($result) && isset($result['error_code'])) {
-      $this->throwAPIException($result);
-      // @codeCoverageIgnoreStart
-    }
-    // @codeCoverageIgnoreEnd
-
-    $method = strtolower($params['method']);
-    if ($method === 'auth.expiresession' ||
-        $method === 'auth.revokeauthorization') {
-      $this->destroySession();
-    }
-
-    return $result;
-  }
-
-  /**
-   * Return true if this is video post.
-   *
-   * @param string $path The path
-   * @param string $method The http method (default 'GET')
-   *
-   * @return boolean true if this is video post
-   */
-  protected function isVideoPost($path, $method = 'GET') {
-    if ($method == 'POST' && preg_match("/^(\/)(.+)(\/)(videos)$/", $path)) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Invoke the Graph API.
-   *
-   * @param string $path The path (required)
-   * @param string $method The http method (default 'GET')
-   * @param array $params The query/post data
-   *
-   * @return mixed The decoded response object
-   * @throws FacebookApiException
-   */
-  protected function _graph($path, $method = 'GET', $params = array()) {
-    if (is_array($method) && empty($params)) {
-      $params = $method;
-      $method = 'GET';
-    }
-    $params['method'] = $method; // method override as we always do a POST
-
-    if ($this->isVideoPost($path, $method)) {
-      $domainKey = 'graph_video';
-    } else {
-      $domainKey = 'graph';
-    }
-
-    $result = json_decode($this->_oauthRequest(
-      $this->getUrl($domainKey, $path),
-      $params
-    ), true);
-
-    // results are returned, errors are thrown
-    if (is_array($result) && isset($result['error'])) {
-      $this->throwAPIException($result);
-      // @codeCoverageIgnoreStart
-    }
-    // @codeCoverageIgnoreEnd
-
-    return $result;
-  }
-
-  /**
-   * Make a OAuth Request.
-   *
-   * @param string $url The path (required)
-   * @param array $params The query/post data
-   *
-   * @return string The decoded response object
-   * @throws FacebookApiException
-   */
-  protected function _oauthRequest($url, $params) {
-    if (!isset($params['access_token'])) {
-      $params['access_token'] = $this->getAccessToken();
-    }
-
-    if (isset($params['access_token'])) {
-      $params['appsecret_proof'] = $this->getAppSecretProof($params['access_token']);
-    }
-
-    // json_encode all params values that are not strings
-    foreach ($params as $key => $value) {
-      if (!is_string($value)) {
-        $params[$key] = json_encode($value);
-      }
-    }
-
-    return $this->makeRequest($url, $params);
-  }
-
-  /**
-   * Generate a proof of App Secret
-   * This is required for all API calls originating from a server
-   * It is a sha256 hash of the access_token made using the app secret
-   *
-   * @param string $access_token The access_token to be hashed (required)
-   *
-   * @return string The sha256 hash of the access_token
-   */
-  protected function getAppSecretProof($access_token) {
-    return hash_hmac('sha256', $access_token, $this->getAppSecret());
-  }
-
-  /**
-   * Makes an HTTP request. This method can be overridden by subclasses if
-   * developers want to do fancier things or use something other than curl to
-   * make the request.
-   *
-   * @param string $url The URL to make the request to
-   * @param array $params The parameters to use for the POST body
-   * @param CurlHandler $ch Initialized curl handle
-   *
-   * @return string The response text
-   */
-  protected function makeRequest($url, $params, $ch=null) {
-    if (!$ch) {
-      $ch = curl_init();
-    }
-
-    $opts = self::$CURL_OPTS;
-    if ($this->getFileUploadSupport()) {
-      $opts[CURLOPT_POSTFIELDS] = $params;
-    } else {
-      $opts[CURLOPT_POSTFIELDS] = http_build_query($params, null, '&');
-    }
-    $opts[CURLOPT_URL] = $url;
-
-    // disable the 'Expect: 100-continue' behaviour. This causes CURL to wait
-    // for 2 seconds if the server does not support this header.
-    if (isset($opts[CURLOPT_HTTPHEADER])) {
-      $existing_headers = $opts[CURLOPT_HTTPHEADER];
-      $existing_headers[] = 'Expect:';
-      $opts[CURLOPT_HTTPHEADER] = $existing_headers;
-    } else {
-      $opts[CURLOPT_HTTPHEADER] = array('Expect:');
-    }
-
-    curl_setopt_array($ch, $opts);
-    $result = curl_exec($ch);
-
-    if (curl_errno($ch) == 60) { // CURLE_SSL_CACERT
-      self::errorLog('Invalid or no certificate authority found, '.
-                     'using bundled information');
-      curl_setopt($ch, CURLOPT_CAINFO,
-                  dirname(__FILE__) . '/fb_ca_chain_bundle.crt');
-      $result = curl_exec($ch);
-    }
-
-    // With dual stacked DNS responses, it's possible for a server to
-    // have IPv6 enabled but not have IPv6 connectivity.  If this is
-    // the case, curl will try IPv4 first and if that fails, then it will
-    // fall back to IPv6 and the error EHOSTUNREACH is returned by the
-    // operating system.
-    if ($result === false && empty($opts[CURLOPT_IPRESOLVE])) {
-        $matches = array();
-        $regex = '/Failed to connect to ([^:].*): Network is unreachable/';
-        if (preg_match($regex, curl_error($ch), $matches)) {
-          if (strlen(@inet_pton($matches[1])) === 16) {
-            self::errorLog('Invalid IPv6 configuration on server, '.
-                           'Please disable or get native IPv6 on your server.');
-            self::$CURL_OPTS[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
-            curl_setopt($ch, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
-            $result = curl_exec($ch);
-          }
-        }
-    }
-
-    if ($result === false) {
-      $e = new FacebookApiException(array(
-        'error_code' => curl_errno($ch),
-        'error' => array(
-        'message' => curl_error($ch),
-        'type' => 'CurlException',
-        ),
-      ));
-      curl_close($ch);
-      throw $e;
-    }
-    curl_close($ch);
-    return $result;
-  }
-
-  /**
-   * Parses a signed_request and validates the signature.
-   *
-   * @param string $signed_request A signed token
-   * @return array The payload inside it or null if the sig is wrong
-   */
-  protected function parseSignedRequest($signed_request) {
-    list($encoded_sig, $payload) = explode('.', $signed_request, 2);
-
-    // decode the data
-    $sig = self::base64UrlDecode($encoded_sig);
-    $data = json_decode(self::base64UrlDecode($payload), true);
-
-    if (strtoupper($data['algorithm']) !== self::SIGNED_REQUEST_ALGORITHM) {
-      self::errorLog(
-        'Unknown algorithm. Expected ' . self::SIGNED_REQUEST_ALGORITHM);
-      return null;
-    }
-
-    // check sig
-    $expected_sig = hash_hmac('sha256', $payload,
-                              $this->getAppSecret(), $raw = true);
-    if ($sig !== $expected_sig) {
-      self::errorLog('Bad Signed JSON signature!');
-      return null;
-    }
-
-    return $data;
-  }
-
-  /**
-   * Makes a signed_request blob using the given data.
-   *
-   * @param array The data array.
-   * @return string The signed request.
-   */
-  protected function makeSignedRequest($data) {
-    if (!is_array($data)) {
-      throw new InvalidArgumentException(
-        'makeSignedRequest expects an array. Got: ' . print_r($data, true));
-    }
-    $data['algorithm'] = self::SIGNED_REQUEST_ALGORITHM;
-    $data['issued_at'] = time();
-    $json = json_encode($data);
-    $b64 = self::base64UrlEncode($json);
-    $raw_sig = hash_hmac('sha256', $b64, $this->getAppSecret(), $raw = true);
-    $sig = self::base64UrlEncode($raw_sig);
-    return $sig.'.'.$b64;
-  }
-
-  /**
-   * Build the URL for api given parameters.
-   *
-   * @param $method String the method name.
-   * @return string The URL for the given parameters
-   */
-  protected function getApiUrl($method) {
-    static $READ_ONLY_CALLS =
-      array('admin.getallocation' => 1,
-            'admin.getappproperties' => 1,
-            'admin.getbannedusers' => 1,
-            'admin.getlivestreamvialink' => 1,
-            'admin.getmetrics' => 1,
-            'admin.getrestrictioninfo' => 1,
-            'application.getpublicinfo' => 1,
-            'auth.getapppublickey' => 1,
-            'auth.getsession' => 1,
-            'auth.getsignedpublicsessiondata' => 1,
-            'comments.get' => 1,
-            'connect.getunconnectedfriendscount' => 1,
-            'dashboard.getactivity' => 1,
-            'dashboard.getcount' => 1,
-            'dashboard.getglobalnews' => 1,
-            'dashboard.getnews' => 1,
-            'dashboard.multigetcount' => 1,
-            'dashboard.multigetnews' => 1,
-            'data.getcookies' => 1,
-            'events.get' => 1,
-            'events.getmembers' => 1,
-            'fbml.getcustomtags' => 1,
-            'feed.getappfriendstories' => 1,
-            'feed.getregisteredtemplatebundlebyid' => 1,
-            'feed.getregisteredtemplatebundles' => 1,
-            'fql.multiquery' => 1,
-            'fql.query' => 1,
-            'friends.arefriends' => 1,
-            'friends.get' => 1,
-            'friends.getappusers' => 1,
-            'friends.getlists' => 1,
-            'friends.getmutualfriends' => 1,
-            'gifts.get' => 1,
-            'groups.get' => 1,
-            'groups.getmembers' => 1,
-            'intl.gettranslations' => 1,
-            'links.get' => 1,
-            'notes.get' => 1,
-            'notifications.get' => 1,
-            'pages.getinfo' => 1,
-            'pages.isadmin' => 1,
-            'pages.isappadded' => 1,
-            'pages.isfan' => 1,
-            'permissions.checkavailableapiaccess' => 1,
-            'permissions.checkgrantedapiaccess' => 1,
-            'photos.get' => 1,
-            'photos.getalbums' => 1,
-            'photos.gettags' => 1,
-            'profile.getinfo' => 1,
-            'profile.getinfooptions' => 1,
-            'stream.get' => 1,
-            'stream.getcomments' => 1,
-            'stream.getfilters' => 1,
-            'users.getinfo' => 1,
-            'users.getloggedinuser' => 1,
-            'users.getstandardinfo' => 1,
-            'users.hasapppermission' => 1,
-            'users.isappuser' => 1,
-            'users.isverified' => 1,
-            'video.getuploadlimits' => 1);
-    $name = 'api';
-    if (isset($READ_ONLY_CALLS[strtolower($method)])) {
-      $name = 'api_read';
-    } else if (strtolower($method) == 'video.upload') {
-      $name = 'api_video';
-    }
-    return self::getUrl($name, 'restserver.php');
-  }
-
-  /**
-   * Build the URL for given domain alias, path and parameters.
-   *
-   * @param $name string The name of the domain
-   * @param $path string Optional path (without a leading slash)
-   * @param $params array Optional query parameters
-   *
-   * @return string The URL for the given parameters
-   */
-  protected function getUrl($name, $path='', $params=array()) {
-    $url = self::$DOMAIN_MAP[$name];
-    if ($path) {
-      if ($path[0] === '/') {
-        $path = substr($path, 1);
-      }
-      $url .= $path;
-    }
-    if ($params) {
-      $url .= '?' . http_build_query($params, null, '&');
-    }
-
-    return $url;
-  }
-
-  protected function getHttpHost() {
-    if ($this->trustForwarded && isset($_SERVER['HTTP_X_FORWARDED_HOST'])) {
-      return $_SERVER['HTTP_X_FORWARDED_HOST'];
-    }
-    return $_SERVER['HTTP_HOST'];
-  }
-
-  protected function getHttpProtocol() {
-    if ($this->trustForwarded && isset($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
-      if ($_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-        return 'https';
-      }
-      return 'http';
-    }
-    /*apache + variants specific way of checking for https*/
-    if (isset($_SERVER['HTTPS']) &&
-        ($_SERVER['HTTPS'] === 'on' || $_SERVER['HTTPS'] == 1)) {
-      return 'https';
-    }
-    /*nginx way of checking for https*/
-    if (isset($_SERVER['SERVER_PORT']) &&
-        ($_SERVER['SERVER_PORT'] === '443')) {
-      return 'https';
-    }
-    return 'http';
-  }
-
-  /**
-   * Get the base domain used for the cookie.
-   */
-  protected function getBaseDomain() {
-    // The base domain is stored in the metadata cookie if not we fallback
-    // to the current hostname
-    $metadata = $this->getMetadataCookie();
-    if (array_key_exists('base_domain', $metadata) &&
-        !empty($metadata['base_domain'])) {
-      return trim($metadata['base_domain'], '.');
-    }
-    return $this->getHttpHost();
-  }
-
-  /**
-
-  /**
-   * Returns the Current URL, stripping it of known FB parameters that should
-   * not persist.
-   *
-   * @return string The current URL
-   */
-  protected function getCurrentUrl() {
-    $protocol = $this->getHttpProtocol() . '://';
-    $host = $this->getHttpHost();
-    $currentUrl = $protocol.$host.$_SERVER['REQUEST_URI'];
-    $parts = parse_url($currentUrl);
-
-    $query = '';
-    if (!empty($parts['query'])) {
-      // drop known fb params
-      $params = explode('&', $parts['query']);
-      $retained_params = array();
-      foreach ($params as $param) {
-        if ($this->shouldRetainParam($param)) {
-          $retained_params[] = $param;
-        }
-      }
-
-      if (!empty($retained_params)) {
-        $query = '?'.implode($retained_params, '&');
-      }
-    }
-
-    // use port if non default
-    $port =
-      isset($parts['port']) &&
-      (($protocol === 'http://' && $parts['port'] !== 80) ||
-       ($protocol === 'https://' && $parts['port'] !== 443))
-      ? ':' . $parts['port'] : '';
-
-    // rebuild
-    return $protocol . $parts['host'] . $port . $parts['path'] . $query;
-  }
-
-  /**
-   * Returns true if and only if the key or key/value pair should
-   * be retained as part of the query string.  This amounts to
-   * a brute-force search of the very small list of Facebook-specific
-   * params that should be stripped out.
-   *
-   * @param string $param A key or key/value pair within a URL's query (e.g.
-   *                     'foo=a', 'foo=', or 'foo'.
-   *
-   * @return boolean
-   */
-  protected function shouldRetainParam($param) {
-    foreach (self::$DROP_QUERY_PARAMS as $drop_query_param) {
-      if (strpos($param, $drop_query_param.'=') === 0) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Analyzes the supplied result to see if it was thrown
-   * because the access token is no longer valid.  If that is
-   * the case, then we destroy the session.
-   *
-   * @param $result array A record storing the error message returned
-   *                      by a failed API call.
-   */
-  protected function throwAPIException($result) {
-    $e = new FacebookApiException($result);
-    switch ($e->getType()) {
-      // OAuth 2.0 Draft 00 style
-      case 'OAuthException':
-        // OAuth 2.0 Draft 10 style
-      case 'invalid_token':
-        // REST server errors are just Exceptions
-      case 'Exception':
-        $message = $e->getMessage();
-        if ((strpos($message, 'Error validating access token') !== false) ||
-            (strpos($message, 'Invalid OAuth access token') !== false) ||
-            (strpos($message, 'An active access token must be used') !== false)
-        ) {
-          $this->destroySession();
-        }
-        break;
-    }
-
-    throw $e;
-  }
-
-
-  /**
-   * Prints to the error log if you aren't in command line mode.
-   *
-   * @param string $msg Log message
-   */
-  protected static function errorLog($msg) {
-    // disable error log if we are running in a CLI environment
-    // @codeCoverageIgnoreStart
-    if (php_sapi_name() != 'cli') {
-      error_log($msg);
-    }
-    // uncomment this if you want to see the errors on the page
-    // print 'error_log: '.$msg."\n";
-    // @codeCoverageIgnoreEnd
-  }
-
-  /**
-   * Base64 encoding that doesn't need to be urlencode()ed.
-   * Exactly the same as base64_encode except it uses
-   *   - instead of +
-   *   _ instead of /
-   *   No padded =
-   *
-   * @param string $input base64UrlEncoded string
-   * @return string
-   */
-  protected static function base64UrlDecode($input) {
-    return base64_decode(strtr($input, '-_', '+/'));
-  }
-
-  /**
-   * Base64 encoding that doesn't need to be urlencode()ed.
-   * Exactly the same as base64_encode except it uses
-   *   - instead of +
-   *   _ instead of /
-   *
-   * @param string $input string
-   * @return string base64Url encoded string
-   */
-  protected static function base64UrlEncode($input) {
-    $str = strtr(base64_encode($input), '+/', '-_');
-    $str = str_replace('=', '', $str);
-    return $str;
-  }
-
-  /**
-   * Destroy the current session
-   */
-  public function destroySession() {
-    $this->accessToken = null;
-    $this->signedRequest = null;
-    $this->user = null;
-    $this->clearAllPersistentData();
-
-    // Javascript sets a cookie that will be used in getSignedRequest that we
-    // need to clear if we can
-    $cookie_name = $this->getSignedRequestCookieName();
-    if (array_key_exists($cookie_name, $_COOKIE)) {
-      unset($_COOKIE[$cookie_name]);
-      if (!headers_sent()) {
-        $base_domain = $this->getBaseDomain();
-        setcookie($cookie_name, '', 1, '/', '.'.$base_domain);
-      } else {
-        // @codeCoverageIgnoreStart
-        self::errorLog(
-          'There exists a cookie that we wanted to clear that we couldn\'t '.
-          'clear because headers was already sent. Make sure to do the first '.
-          'API call before outputing anything.'
-        );
-        // @codeCoverageIgnoreEnd
-      }
-    }
-  }
-
-  /**
-   * Parses the metadata cookie that our Javascript API set
-   *
-   * @return  an array mapping key to value
-   */
-  protected function getMetadataCookie() {
-    $cookie_name = $this->getMetadataCookieName();
-    if (!array_key_exists($cookie_name, $_COOKIE)) {
-      return array();
-    }
-
-    // The cookie value can be wrapped in "-characters so remove them
-    $cookie_value = trim($_COOKIE[$cookie_name], '"');
-
-    if (empty($cookie_value)) {
-      return array();
-    }
-
-    $parts = explode('&', $cookie_value);
-    $metadata = array();
-    foreach ($parts as $part) {
-      $pair = explode('=', $part, 2);
-      if (!empty($pair[0])) {
-        $metadata[urldecode($pair[0])] =
-          (count($pair) > 1) ? urldecode($pair[1]) : '';
-      }
-    }
-
-    return $metadata;
-  }
-
-  protected static function isAllowedDomain($big, $small) {
-    if ($big === $small) {
-      return true;
-    }
-    return self::endsWith($big, '.'.$small);
-  }
-
-  protected static function endsWith($big, $small) {
-    $len = strlen($small);
-    if ($len === 0) {
-      return true;
-    }
-    return substr($big, -$len) === $small;
-  }
-
-  /**
-   * Each of the following four methods should be overridden in
-   * a concrete subclass, as they are in the provided Facebook class.
-   * The Facebook class uses PHP sessions to provide a primitive
-   * persistent store, but another subclass--one that you implement--
-   * might use a database, memcache, or an in-memory cache.
-   *
-   * @see Facebook
-   */
-
-  /**
-   * Stores the given ($key, $value) pair, so that future calls to
-   * getPersistentData($key) return $value. This call may be in another request.
-   *
-   * @param string $key
-   * @param array $value
-   *
-   * @return void
-   */
-  abstract protected function setPersistentData($key, $value);
-
-  /**
-   * Get the data for $key, persisted by BaseFacebook::setPersistentData()
-   *
-   * @param string $key The key of the data to retrieve
-   * @param boolean $default The default value to return if $key is not found
-   *
-   * @return mixed
-   */
-  abstract protected function getPersistentData($key, $default = false);
-
-  /**
-   * Clear the data with $key from the persistent storage
-   *
-   * @param string $key
-   * @return void
-   */
-  abstract protected function clearPersistentData($key);
-
-  /**
-   * Clear all data from the persistent storage
-   *
-   * @return void
-   */
-  abstract protected function clearAllPersistentData();
-}
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  The licenses for most software and other practical works are designed
+to take away your freedom to share and change the works.  By contrast,
+the GNU General Public License is intended to guarantee your freedom to
+share and change all versions of a program--to make sure it remains free
+software for all its users.  We, the Free Software Foundation, use the
+GNU General Public License for most of our software; it applies also to
+any other work released this way by its authors.  You can apply it to
+your programs, too.
+
+  When we speak of free software, we are referring to freedom, not
+price.  Our General Public Licenses are designed to make sure that you
+have the freedom to distribute copies of free software (and charge for
+them if you wish), that you receive source code or can get it if you
+want it, that you can change the software or use pieces of it in new
+free programs, and that you know you can do these things.
+
+  To protect your rights, we need to prevent others from denying you
+these rights or asking you to surrender the rights.  Therefore, you have
+certain responsibilities if you distribute copies of the software, or if
+you modify it: responsibilities to respect the freedom of others.
+
+  For example, if you distribute copies of such a program, whether
+gratis or for a fee, you must pass on to the recipients the same
+freedoms that you received.  You must make sure that they, too, receive
+or can get the source code.  And you must show them these terms so they
+know their rights.
+
+  Developers that use the GNU GPL protect your rights with two steps:
+(1) assert copyright on the software, and (2) offer you this License
+giving you legal permission to copy, distribute and/or modify it.
+
+  For the developers' and authors' protection, the GPL clearly explains
+that there is no warranty for this free software.  For both users' and
+authors' sake, the GPL requires that modified versions be marked as
+changed, so that their problems will not be attributed erroneously to
+authors of previous versions.
+
+  Some devices are designed to deny users access to install or run
+modified versions of the software inside them, although the manufacturer
+can do so.  This is fundamentally incompatible with the aim of
+protecting users' freedom to change the software.  The systematic
+pattern of such abuse occurs in the area of products for individuals to
+use, which is precisely where it is most unacceptable.  Therefore, we
+have designed this version of the GPL to prohibit the practice for those
+products.  If such problems arise substantially in other domains, we
+stand ready to extend this provision to those domains in future versions
+of the GPL, as needed to protect the freedom of users.
+
+  Finally, every program is threatened constantly by software patents.
+States should not allow patents to restrict development and use of
+software on general-purpose computers, but in those that do, we wish to
+avoid the special danger that patents applied to a free program could
+make it effectively proprietary.  To prevent this, the GPL assures that
+patents cannot be used to render the program non-free.
+
+  The precise terms and conditions for copying, distribution and
+modification follow.
+
+                       TERMS AND CONDITIONS
+
+  0. Definitions.
+
+  "This License" refers to version 3 of the GNU General Public License.
+
+  "Copyright" also means copyright-like laws that apply to other kinds of
+works, such as semiconductor masks.
+
+  "The Program" refers to any copyrightable work licensed under this
+License.  Each licensee is addressed as "you".  "Licensees" and
+"recipients" may be individuals or organizations.
+
+  To "modify" a work means to copy from or adapt all or part of the work
+in a fashion requiring copyright permission, other than the making of an
+exact copy.  The resulting work is called a "modified version" of the
+earlier work or a work "based on" the earlier work.
+
+  A "covered work" means either the unmodified Program or a work based
+on the Program.
+
+  To "propagate" a work means to do anything with it that, without
+permission, would make you directly or secondarily liable for
+infringement under applicable copyright law, except executing it on a
+computer or modifying a private copy.  Propagation includes copying,
+distribution (with or without modification), making available to the
+public, and in some countries other activities as well.
+
+  To "convey" a work means any kind of propagation that enables other
+parties to make or receive copies.  Mere interaction with a user through
+a computer network, with no transfer of a copy, is not conveying.
+
+  An interactive user interface displays "Appropriate Legal Notices"
+to the extent that it includes a convenient and prominently visible
+feature that (1) displays an appropriate copyright notice, and (2)
+tells the user that there is no warranty for the work (except to the
+extent that warranties are provided), that licensees may convey the
+work under this License, and how to view a copy of this License.  If
+the interface presents a list of user commands or options, such as a
+menu, a prominent item in the list meets this criterion.
+
+  1. Source Code.
+
+  The "source code" for a work means the preferred form of the work
+for making modifications to it.  "Object code" means any non-source
+form of a work.
+
+  A "Standard Interface" means an interface that either is an official
+standard defined by a recognized standards body, or, in the case of
+interfaces specified for a particular programming language, one that
+is widely used among developers working in that language.
+
+  The "System Libraries" of an executable work include anything, other
+than the work as a whole, that (a) is included in the normal form of
+packaging a Major Component, but which is not part of that Major
+Component, and (b) serves only to enable use of the work with that
+Major Component, or to implement a Standard Interface for which an
+implementation is available to the public in source code form.  A
+"Major Component", in this context, means a major essential component
+(kernel, window system, and so on) of the specific operating system
+(if any) on which the executable work runs, or a compiler used to
+produce the work, or an object code interpreter used to run it.
+
+  The "Corresponding Source" for a work in object code form means all
+the source code needed to generate, install, and (for an executable
+work) run the object code and to modify the work, including scripts to
+control those activities.  However, it does not include the work's
+System Libraries, or general-purpose tools or generally available free
+programs which are used unmodified in performing those activities but
+which are not part of the work.  For example, Corresponding Source
+includes interface definition files associated with source files for
+the work, and the source code for shared libraries and dynamically
+linked subprograms that the work is specifically designed to require,
+such as by intimate data communication or control flow between those
+subprograms and other parts of the work.
+
+  The Corresponding Source need not include anything that users
+can regenerate automatically from other parts of the Corresponding
+Source.
+
+  The Corresponding Source for a work in source code form is that
+same work.
+
+  2. Basic Permissions.
+
+  All rights granted under this License are granted for the term of
+copyright on the Program, and are irrevocable provided the stated
+conditions are met.  This License explicitly affirms your unlimited
+permission to run the unmodified Program.  The output from running a
+covered work is covered by this License only if the output, given its
+content, constitutes a covered work.  This License acknowledges your
+rights of fair use or other equivalent, as provided by copyright law.
+
+  You may make, run and propagate covered works that you do not
+convey, without conditions so long as your license otherwise remains
+in force.  You may convey covered works to others for the sole purpose
+of having them make modifications exclusively for you, or provide you
+with facilities for running those works, provided that you comply with
+the terms of this License in conveying all material for which you do
+not control copyright.  Those thus making or running the covered works
+for you must do so exclusively on your behalf, under your direction
+and control, on terms that prohibit them from making any copies of
+your copyrighted material outside their relationship with you.
+
+  Conveying under any other circumstances is permitted solely under
+the conditions stated below.  Sublicensing is not allowed; section 10
+makes it unnecessary.
+
+  3. Protecting Users' Legal Rights From Anti-Circumvention Law.
+
+  No covered work shall be deemed part of an effective technological
+measure under any applicable law fulfilling obligations under article
+11 of the WIPO copyright treaty adopted on 20 December 1996, or
+similar laws prohibiting or restricting circumvention of such
+measures.
+
+  When you convey a covered work, you waive any legal power to forbid
+circumvention of technological measures to the extent such circumvention
+is effected by exercising rights under this License with respect to
+the covered work, and you disclaim any intention to limit operation or
+modification of the work as a means of enforcing, against the work's
+users, your or third parties' legal rights to forbid circumvention of
+technological measures.
+
+  4. Conveying Verbatim Copies.
+
+  You may convey verbatim copies of the Program's source code as you
+receive it, in any medium, provided that you conspicuously and
+appropriately publish on each copy an appropriate copyright notice;
+keep intact all notices stating that this License and any
+non-permissive terms added in accord with section 7 apply to the code;
+keep intact all notices of the absence of any warranty; and give all
+recipients a copy of this License along with the Program.
+
+  You may charge any price or no price for each copy that you convey,
+and you may offer support or warranty protection for a fee.
+
+  5. Conveying Modified Source Versions.
+
+  You may convey a work based on the Program, or the modifications to
+produce it from the Program, in the form of source code under the
+terms of section 4, provided that you also meet all of these conditions:
+
+    a) The work must carry prominent notices stating that you modified
+    it, and giving a relevant date.
+
+    b) The work must carry prominent notices stating that it is
+    released under this License and any conditions added under section
+    7.  This requirement modifies the requirement in section 4 to
+    "keep intact all notices".
+
+    c) You must license the entire work, as a whole, under this
+    License to anyone who comes into possession of a copy.  This
+    License will therefore apply, along with any applicable section 7
+    additional terms, to the whole of the work, and all its parts,
+    regardless of how they are packaged.  This License gives no
+    permission to license the work in any other way, but it does not
+    invalidate such permission if you have separately received it.
+
+    d) If the work has interactive user interfaces, each must display
+    Appropriate Legal Notices; however, if the Program has interactive
+    interfaces that do not display Appropriate Legal Notices, your
+    work need not make them do so.
+
+  A compilation of a covered work with other separate and independent
+works, which are not by their nature extensions of the covered work,
+and which are not combined with it such as to form a larger program,
+in or on a volume of a storage or distribution medium, is called an
+"aggregate" if the compilation and its resulting copyright are not
+used to limit the access or legal rights of the compilation's users
+beyond what the individual works permit.  Inclusion of a covered work
+in an aggregate does not cause this License to apply to the other
+parts of the aggregate.
+
+  6. Conveying Non-Source Forms.
+
+  You may convey a covered work in object code form under the terms
+of sections 4 and 5, provided that you also convey the
+machine-readable Corresponding Source under the terms of this License,
+in one of these ways:
+
+    a) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by the
+    Corresponding Source fixed on a durable physical medium
+    customarily used for software interchange.
+
+    b) Convey the object code in, or embodied in, a physical product
+    (including a physical distribution medium), accompanied by a
+    written offer, valid for at least three years and valid for as
+    long as you offer spare parts or customer support for that product
+    model, to give anyone who possesses the object code either (1) a
+    copy of the Corresponding Source for all the software in the
+    product that is covered by this License, on a durable physical
+    medium customarily used for software interchange, for a price no
+    more than your reasonable cost of physically performing this
+    conveying of source, or (2) access to copy the
+    Corresponding Source from a network server at no charge.
+
+    c) Convey individual copies of the object code with a copy of the
+    written offer to provide the Corresponding Source.  This
+    alternative is allowed only occasionally and noncommercially, and
+    only if you received the object code with such an offer, in accord
+    with subsection 6b.
+
+    d) Convey the object code by offering access from a designated
+    place (gratis or for a charge), and offer equivalent access to the
+    Corresponding Source in the same way through the same place at no
+    further charge.  You need not require recipients to copy the
+    Corresponding Source along with the object code.  If the place to
+    copy the object code is a network server, the Corresponding Source
+    may be on a different server (operated by you or a third party)
+    that supports equivalent copying facilities, provided you maintain
+    clear directions next to the object code saying where to find the
+    Corresponding Source.  Regardless of what server hosts the
+    Corresponding Source, you remain obligated to ensure that it is
+    available for as long as needed to satisfy these requirements.
+
+    e) Convey the object code using peer-to-peer transmission, provided
+    you inform other peers where the object code and Corresponding
+    Source of the work are being offered to the general public at no
+    charge under subsection 6d.
+
+  A separable portion of the object code, whose source code is excluded
+from the Corresponding Source as a System Library, need not be
+included in conveying the object code work.
+
+  A "User Product" is either (1) a "consumer product", which means any
+tangible personal property which is normally used for personal, family,
+or household purposes, or (2) anything designed or sold for incorporation
+into a dwelling.  In determining whether a product is a consumer product,
+doubtful cases shall be resolved in favor of coverage.  For a particular
+product received by a particular user, "normally used" refers to a
+typical or common use of that class of product, regardless of the status
+of the particular user or of the way in which the particular user
+actually uses, or expects or is expected to use, the product.  A product
+is a consumer product regardless of whether the product has substantial
+commercial, industrial or non-consumer uses, unless such uses represent
+the only significant mode of use of the product.
+
+  "Installation Information" for a User Product means any methods,
+procedures, authorization keys, or other information required to install
+and execute modified versions of a covered work in that User Product from
+a modified version of its Corresponding Source.  The information must
+suffice to ensure that the continued functioning of the modified object
+code is in no case prevented or interfered with solely because
+modification has been made.
+
+  If you convey an object code work under this section in, or with, or
+specifically for use in, a User Product, and the conveying occurs as
+part of a transaction in which the right of possession and use of the
+User Product is transferred to the recipient in perpetuity or for a
+fixed term (regardless of how the transaction is characterized), the
+Corresponding Source conveyed under this section must be accompanied
+by the Installation Information.  But this requirement does not apply
+if neither you nor any third party retains the ability to install
+modified object code on the User Product (for example, the work has
+been installed in ROM).
+
+  The requirement to provide Installation Information does not include a
+requirement to continue to provide support service, warranty, or updates
+for a work that has been modified or installed by the recipient, or for
+the User Product in which it has been modified or installed.  Access to a
+network may be denied when the modification itself materially and
+adversely affects the operation of the network or violates the rules and
+protocols for communication across the network.
+
+  Corresponding Source conveyed, and Installation Information provided,
+in accord with this section must be in a format that is publicly
+documented (and with an implementation available to the public in
+source code form), and must require no special password or key for
+unpacking, reading or copying.
+
+  7. Additional Terms.
+
+  "Additional permissions" are terms that supplement the terms of this
+License by making exceptions from one or more of its conditions.
+Additional permissions that are applicable to the entire Program shall
+be treated as though they were included in this License, to the extent
+that they are valid under applicable law.  If additional permissions
+apply only to part of the Program, that part may be used separately
+under those permissions, but the entire Program remains governed by
+this License without regard to the additional permissions.
+
+  When you convey a copy of a covered work, you may at your option
+remove any additional permissions from that copy, or from any part of
+it.  (Additional permissions may be written to require their own
+removal in certain cases when you modify the work.)  You may place
+additional permissions on material, added by you to a covered work,
+for which you have or can give appropriate copyright permission.
+
+  Notwithstanding any other provision of this License, for material you
+add to a covered work, you may (if authorized by the copyright holders of
+that material) supplement the terms of this License with terms:
+
+    a) Disclaiming warranty or limiting liability differently from the
+    terms of sections 15 and 16 of this License; or
+
+    b) Requiring preservation of specified reasonable legal notices or
+    author attributions in that material or in the Appropriate Legal
+    Notices displayed by works containing it; or
+
+    c) Prohibiting misrepresentation of the origin of that material, or
+    requiring that modified versions of such material be marked in
+    reasonable ways as different from the original version; or
+
+    d) Limiting the use for publicity purposes of names of licensors or
+    authors of the material; or
+
+    e) Declining to grant rights under trademark law for use of some
+    trade names, trademarks, or service marks; or
+
+    f) Requiring indemnification of licensors and authors of that
+    material by anyone who conveys the material (or modified versions of
+    it) with contractual assumptions of liability to the recipient, for
+    any liability that these contractual assumptions directly impose on
+    those licensors and authors.
+
+  All other non-permissive additional terms are considered "further
+restrictions" within the meaning of section 10.  If the Program as you
+received it, or any part of it, contains a notice stating that it is
+governed by this License along with a term that is a further
+restriction, you may remove that term.  If a license document contains
+a further restriction but permits relicensing or conveying under this
+License, you may add to a covered work material governed by the terms
+of that license document, provided that the further restriction does
+not survive such relicensing or conveying.
+
+  If you add terms to a covered work in accord with this section, you
+must place, in the relevant source files, a statement of the
+additional terms that apply to those files, or a notice indicating
+where to find the applicable terms.
+
+  Additional terms, permissive or non-permissive, may be stated in the
+form of a separately written license, or stated as exceptions;
+the above requirements apply either way.
+
+  8. Termination.
+
+  You may not propagate or modify a covered work except as expressly
+provided under this License.  Any attempt otherwise to propagate or
+modify it is void, and will automatically terminate your rights under
+this License (including any patent licenses granted under the third
+paragraph of section 11).
+
+  However, if you cease all violation of this License, then your
+license from a particular copyright holder is reinstated (a)
+provisionally, unless and until the copyright holder explicitly and
+finally terminates your license, and (b) permanently, if the copyright
+holder fails to notify you of the violation by some reasonable means
+prior to 60 days after the cessation.
+
+  Moreover, your license from a particular copyright holder is
+reinstated permanently if the copyright holder notifies you of the
+violation by some reasonable means, this is the first time you have
+received notice of violation of this License (for any work) from that
+copyright holder, and you cure the violation prior to 30 days after
+your receipt of the notice.
+
+  Termination of your rights under this section does not terminate the
+licenses of parties who have received copies or rights from you under
+this License.  If your rights have been terminated and not permanently
+reinstated, you do not qualify to receive new licenses for the same
+material under section 10.
+
+  9. Acceptance Not Required for Having Copies.
+
+  You are not required to accept this License in order to receive or
+run a copy of the Program.  Ancillary propagation of a covered work
+occurring solely as a consequence of using peer-to-peer transmission
+to receive a copy likewise does not require acceptance.  However,
+nothing other than this License grants you permission to propagate or
+modify any covered work.  These actions infringe copyright if you do
+not accept this License.  Therefore, by modifying or propagating a
+covered work, you indicate your acceptance of this License to do so.
+
+  10. Automatic Licensing of Downstream Recipients.
+
+  Each time you convey a covered work, the recipient automatically
+receives a license from the original licensors, to run, modify and
+propagate that work, subject to this License.  You are not responsible
+for enforcing compliance by third parties with this License.
+
+  An "entity transaction" is a transaction transferring control of an
+organization, or substantially all assets of one, or subdividing an
+organization, or merging organizations.  If propagation of a covered
+work results from an entity transaction, each party to that
+transaction who receives a copy of the work also receives whatever
+licenses to the work the party's predecessor in interest had or could
+give under the previous paragraph, plus a right to possession of the
+Corresponding Source of the work from the predecessor in interest, if
+the predecessor has it or can get it with reasonable efforts.
+
+  You may not impose any further restrictions on the exercise of the
+rights granted or affirmed under this License.  For example, you may
+not impose a license fee, royalty, or other charge for exercise of
+rights granted under this License, and you may not initiate litigation
+(including a cross-claim or counterclaim in a lawsuit) alleging that
+any patent claim is infringed by making, using, selling, offering for
+sale, or importing the Program or any portion of it.
+
+  11. Patents.
+
+  A "contributor" is a copyright holder who authorizes use under this
+License of the Program or a work on which the Program is based.  The
+work thus licensed is called the contributor's "contributor version".
+
+  A contributor's "essential patent claims" are all patent claims
+owned or controlled by the contributor, whether already acquired or
+hereafter acquired, that would be infringed by some manner, permitted
+by this License, of making, using, or selling its contributor version,
+but do not include claims that would be infringed only as a
+consequence of further modification of the contributor version.  For
+purposes of this definition, "control" includes the right to grant
+patent sublicenses in a manner consistent with the requirements of
+this License.
+
+  Each contributor grants you a non-exclusive, worldwide, royalty-free
+patent license under the contributor's essential patent claims, to
+make, use, sell, offer for sale, import and otherwise run, modify and
+propagate the contents of its contributor version.
+
+  In the following three paragraphs, a "patent license" is any express
+agreement or commitment, however denominated, not to enforce a patent
+(such as an express permission to practice a patent or covenant not to
+sue for patent infringement).  To "grant" such a patent license to a
+party means to make such an agreement or commitment not to enforce a
+patent against the party.
+
+  If you convey a covered work, knowingly relying on a patent license,
+and the Corresponding Source of the work is not available for anyone
+to copy, free of charge and under the terms of this License, through a
+publicly available network server or other readily accessible means,
+then you must either (1) cause the Corresponding Source to be so
+available, or (2) arrange to deprive yourself of the benefit of the
+patent license for this particular work, or (3) arrange, in a manner
+consistent with the requirements of this License, to extend the patent
+license to downstream recipients.  "Knowingly relying" means you have
+actual knowledge that, but for the patent license, your conveying the
+covered work in a country, or your recipient's use of the covered work
+in a country, would infringe one or more identifiable patents in that
+country that you have reason to believe are valid.
+
+  If, pursuant to or in connection with a single transaction or
+arrangement, you convey, or propagate by procuring conveyance of, a
+covered work, and grant a patent license to some of the parties
+receiving the covered work authorizing them to use, propagate, modify
+or convey a specific copy of the covered work, then the patent license
+you grant is automatically extended to all recipients of the covered
+work and works based on it.
+
+  A patent license is "discriminatory" if it does not include within
+the scope of its coverage, prohibits the exercise of, or is
+conditioned on the non-exercise of one or more of the rights that are
+specifically granted under this License.  You may not convey a covered
+work if you are a party to an arrangement with a third party that is
+in the business of distributing software, under which you make payment
+to the third party based on the extent of your activity of conveying
+the work, and under which the third party grants, to any of the
+parties who would receive the covered work from you, a discriminatory
+patent license (a) in connection with copies of the covered work
+conveyed by you (or copies made from those copies), or (b) primarily
+for and in connection with specific products or compilations that
+contain the covered work, unless you entered into that arrangement,
+or that patent license was granted, prior to 28 March 2007.
+
+  Nothing in this License shall be construed as excluding or limiting
+any implied license or other defenses to infringement that may
+otherwise be available to you under applicable patent law.
+
+  12. No Surrender of Others' Freedom.
+
+  If conditions are imposed on you (whether by court order, agreement or
+otherwise) that contradict the conditions of this License, they do not
+excuse you from the conditions of this License.  If you cannot convey a
+covered work so as to satisfy simultaneously your obligations under this
+License and any other pertinent obligations, then as a consequence you may
+not convey it at all.  For example, if you agree to terms that obligate you
+to collect a royalty for further conveying from those to whom you convey
+the Program, the only way you could satisfy both those terms and this
+License would be to refrain entirely from conveying the Program.
+
+  13. Use with the GNU Affero General Public License.
+
+  Notwithstanding any other provision of this License, you have
+permission to link or combine any covered work with a work licensed
+under version 3 of the GNU Affero General Public License into a single
+combined work, and to convey the resulting work.  The terms of this
+License will continue to apply to the part which is the covered work,
+but the special requirements of the GNU Affero General Public License,
+section 13, concerning interaction through a network will apply to the
+combination as such.
+
+  14. Revised Versions of this License.
+
+  The Free Software Foundation may publish revised and/or new versions of
+the GNU General Public License from time to time.  Such new versions will
+be similar in spirit to the present version, but may differ in detail to
+address new problems or concerns.
+
+  Each version is given a distinguishing version number.  If the
+Program specifies that a certain numbered version of the GNU General
+Public License "or any later version" applies to it, you have the
+option of following the terms and conditions either of that numbered
+version or of any later version published by the Free Software
+Foundation.  If the Program does not specify a version number of the
+GNU General Public License, you may choose any version ever published
+by the Free Software Foundation.
+
+  If the Program specifies that a proxy can decide which future
+versions of the GNU General Public License can be used, that proxy's
+public statement of acceptance of a version permanently authorizes you
+to choose that version for the Program.
+
+  Later license versions may give you additional or different
+permissions.  However, no additional obligations are imposed on any
+author or copyright holder as a result of your choosing to follow a
+later version.
+
+  15. Disclaimer of Warranty.
+
+  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
+APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
+OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
+IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
+ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+  16. Limitation of Liability.
+
+  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
+GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
+USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
+DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
+PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
+EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+  17. Interpretation of Sections 15 and 16.
+
+  If the disclaimer of warranty and limitation of liability provided
+above cannot be given local legal effect according to their terms,
+reviewing courts shall apply local law that most closely approximates
+an absolute waiver of all civil liability in connection with the
+Program, unless a warranty or assumption of liability accompanies a
+copy of the Program in return for a fee.
+
+                     END OF TERMS AND CONDITIONS
+
+            How to Apply These Terms to Your New Programs
+
+  If you develop a new program, and you want it to be of the greatest
+possible use to the public, the best way to achieve this is to make it
+free software which everyone can redistribute and change under these terms.
+
+  To do so, attach the following notices to the program.  It is safest
+to attach them to the start of each source file to most effectively
+state the exclusion of warranty; and each file should have at least
+the "copyright" line and a pointer to where the full notice is found.
+
+    <one line to give the program's name and a brief idea of what it does.>
+    Copyright (C) <year>  <name of author>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+Also add information on how to contact you by electronic and paper mail.
+
+  If the program does terminal interaction, make it output a short
+notice like this when it starts in an interactive mode:
+
+    <program>  Copyright (C) <year>  <name of author>
+    This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
+    This is free software, and you are welcome to redistribute it
+    under certain conditions; type `show c' for details.
+
+The hypothetical commands `show w' and `show c' should show the appropriate
+parts of the General Public License.  Of course, your program's commands
+might be different; for a GUI interface, you would use an "about box".
+
+  You should also get your employer (if you work as a programmer) or school,
+if any, to sign a "copyright disclaimer" for the program, if necessary.
+For more information on this, and how to apply and follow the GNU GPL, see
+<http://www.gnu.org/licenses/>.
+
+  The GNU General Public License does not permit incorporating your program
+into proprietary programs.  If your program is a subroutine library, you
+may consider it more useful to permit linking proprietary applications with
+the library.  If this is what you want to do, use the GNU Lesser General
+Public License instead of this License.  But first, please read
+<http://www.gnu.org/philosophy/why-not-lgpl.html>.

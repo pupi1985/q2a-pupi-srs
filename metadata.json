@@ -1,9 +1,9 @@
 {
     "name": "SPAM Registration Stopper",
     "uri": "https://github.com/pupi1985/q2a-pupi-srs",
-    "description": "Prevents highly probable SPAM registrations based on well-known SPAM checking services",
-    "version": "1.1.0",
-    "date": "2021-12-31",
+    "description": "Prevents highly probable SPAM registrations based on well-known SPAM checking services and other techniques",
+    "version": "1.2.0",
+    "date": "2022-01-01",
     "author": "Gabriel Zanetti",
     "author_uri": "https://question2answer.org/qa/user/pupi1985",
     "license": "GPLv3",
