@@ -1,14 +1,7 @@
 <?php
 
-abstract class PUPI_SRS_AbstractService
+abstract class PUPI_SRS_AbstractOnlineUserValidator extends PUPI_SRS_AbstractValidator
 {
-    /**
-     * Name of the service that helps in identification and logging.
-     *
-     * @var string
-     */
-    protected $name;
-
     /**
      * Return whether the given email and IP address are likely to belong to a SPAM user.
      * If any error is thrown, return an exception with the message to log in the server error log.
@@ -26,9 +19,4 @@ abstract class PUPI_SRS_AbstractService
      * Executed when saving the admin form.
      */
     public abstract function saveAdminForm();
-
-    public function getName(): string
-    {
-        return $this->name;
-    }
 }

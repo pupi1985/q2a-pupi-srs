@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractService
+class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const PROJECTHONEYPOT_KEY_SETTING = 'pupi_srs_projecthoneypot_key';
     /**

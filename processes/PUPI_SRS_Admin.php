@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_AdminProcess
+class PUPI_SRS_Admin
 {
     const SAVE_BUTTON = 'pupi_srs_save_button';
     const RESET_ALL_STATS_BUTTON = 'pupi_srs_reset_all_stats';
@@ -16,25 +16,32 @@ class PUPI_SRS_AdminProcess
 
     function admin_form(&$qa_content)
     {
-        require_once 'Services/PUPI_SRS_ServiceManager.php';
+        require_once $this->directory . 'Services/PUPI_SRS_ServiceManager.php';
 
-        $services = PUPI_SRS_ServiceManager::getAllServices($this->directory);
+        $duplicateEmailValidators = PUPI_SRS_ServiceManager::getAllDuplicateEmailValidators($this->directory);
+        $onlineUsersValidators = PUPI_SRS_ServiceManager::getAllOnlineUsersValidators($this->directory);
 
         $ok = null;
         if (qa_clicked(self::RESET_ALL_STATS_BUTTON)) {
-            $servicesStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($services);
+            $duplicateEmailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($duplicateEmailValidators);
+            $onlineUsersValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($onlineUsersValidators);
 
-            qa_opt('pupi_srs_services_stats', json_encode($servicesStats));
+            qa_opt('pupi_srs_emails_stats', json_encode($duplicateEmailValidatorStats));
+            qa_opt('pupi_srs_services_stats', json_encode($onlineUsersValidatorStats));
 
             $ok = qa_lang_html('pupi_srs/admin_reset_all_stats_success_message');
         } else {
-            $servicesStats = json_decode(qa_opt('pupi_srs_services_stats'), true);
-            if (is_null($servicesStats)) {
-                $servicesStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($services);
+            $duplicateEmailValidatorStats = json_decode(qa_opt('pupi_srs_emails_stats'), true);
+            if (is_null($duplicateEmailValidatorStats)) {
+                $duplicateEmailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($duplicateEmailValidators);
+            }
+            $onlineUsersValidatorStats = json_decode(qa_opt('pupi_srs_services_stats'), true);
+            if (is_null($onlineUsersValidatorStats)) {
+                $onlineUsersValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($onlineUsersValidators);
             }
 
             if (qa_clicked(self::SAVE_BUTTON)) {
-                $this->saveForm($services);
+                $this->saveForm($onlineUsersValidators);
                 $ok = qa_lang_html('admin/options_saved');
             }
         }
@@ -43,7 +50,7 @@ class PUPI_SRS_AdminProcess
 
         return [
             'ok' => $ok,
-            'fields' => $this->getFields($services, $servicesStats),
+            'fields' => $this->getFields($onlineUsersValidators, $duplicateEmailValidatorStats, $onlineUsersValidatorStats),
             'buttons' => $this->getButtons(),
         ];
     }
@@ -71,14 +78,9 @@ class PUPI_SRS_AdminProcess
         ];
     }
 
-    /**
-     * @param $providers
-     *
-     * @return string
-     */
-    private function getServicesTable($providers): string
+    private function getServicesTable($providers, $title): string
     {
-        $html = sprintf('<h2>%s</h2>', qa_lang_html('pupi_srs/admin_services_stats_title'));
+        $html = sprintf('<h2 class="pupi_srs_services-stats-title">%s</h2>', $title);
 
         $html .= '<div class="pupi_srs_services-stats">';
 
@@ -125,17 +127,37 @@ class PUPI_SRS_AdminProcess
         return $html; // pupi_srs_services-stats
     }
 
-    private function getFields(array $services, array $servicesStats): array
+    private function getEmailConfirmationDisabledWarning()
+    {
+        $html = '<div class="pupi_srs_email-confirmation-warning">';
+        $html .= qa_lang_html_sub(
+            'pupi_srs/admin_emails_stats_confirmation_warning',
+            '<span class="pupi_srs_email-confirmation-warning-setting">' . qa_lang_html('options/confirm_user_emails') . '</span>'
+        );
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    private function getFields(array $onlineUsersValidators, array $duplicateEmailValidatorStats, array $onlineUsersValidatorStats): array
     {
         $result = [];
 
-        foreach ($services as $service) {
+        foreach ($onlineUsersValidators as $service) {
             $result += $service->getAdminFormFields();
         }
 
-        $result['custom'] = [
+        $html = $this->getServicesTable($duplicateEmailValidatorStats['providers'], qa_lang_html('pupi_srs/admin_emails_stats_title'));
+
+        if (!qa_opt('confirm_user_emails')) {
+            $html .= $this->getEmailConfirmationDisabledWarning();
+        }
+
+        $html .= $this->getServicesTable($onlineUsersValidatorStats['providers'], qa_lang_html('pupi_srs/admin_online_stats_title'));
+
+        $result['admin_settings'] = [
             'type' => 'custom',
-            'html' => $this->getServicesTable($servicesStats['providers']),
+            'html' => $html,
         ];
 
         return $result;
@@ -147,4 +169,5 @@ class PUPI_SRS_AdminProcess
             $service->saveAdminForm();
         }
     }
+
 }

@@ -4,12 +4,31 @@ class PUPI_SRS_ServiceManager
 {
     const MONTHS_BACK_HISTORY = 3;
 
-    public static function getAllServices($pluginDirectory): array
+    const DUPLICATE_EMAIL_VALIDATORS = 'DuplicateEmailValidators';
+    const ONLINE_USER_VALIDATORS = 'OnlineUserValidators';
+
+    public static function getAllDuplicateEmailValidators(string $pluginDirectory): array
+    {
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractValidator.php';
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractDuplicateEmailValidator.php';
+
+        return self::getAllServicesForCategory($pluginDirectory, self::DUPLICATE_EMAIL_VALIDATORS);
+    }
+
+    public static function getAllOnlineUsersValidators(string $pluginDirectory): array
+    {
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractValidator.php';
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractOnlineUserValidator.php';
+
+        return self::getAllServicesForCategory($pluginDirectory, self::ONLINE_USER_VALIDATORS);
+    }
+
+    private static function getAllServicesForCategory(string $pluginDirectory, string $category): array
     {
         $result = [];
-        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractService.php';
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractValidator.php';
 
-        $serviceFiles = glob($pluginDirectory . '/Services/Providers/*.php');
+        $serviceFiles = glob($pluginDirectory . '/Services/Providers/' . $category . '/*.php');
 
         foreach ($serviceFiles as $serviceFile) {
             require_once $serviceFile;
@@ -52,9 +71,9 @@ class PUPI_SRS_ServiceManager
         return $result;
     }
 
-    public static function migrateOldStatsToNewStats(array $services, array &$newStats)
+    public static function migrateOldStatsToNewStats(array $services, array &$newStats, string $setting)
     {
-        $oldStats = json_decode(qa_opt('pupi_srs_services_stats'), true);
+        $oldStats = json_decode(qa_opt($setting), true);
         if (is_null($oldStats)) {
             return;
         }
@@ -96,8 +115,8 @@ class PUPI_SRS_ServiceManager
         }
     }
 
-    public static function saveStats(array $newStats)
+    public static function saveStats(string $setting, array $newStats)
     {
-        qa_opt('pupi_srs_services_stats', json_encode($newStats));
+        qa_opt($setting, json_encode($newStats));
     }
 }

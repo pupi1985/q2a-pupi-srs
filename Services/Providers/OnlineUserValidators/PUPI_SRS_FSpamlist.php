@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractService
+class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const FSPAMLIST_KEY_SETTING = 'pupi_srs_fspamlist_key';
     /**

@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_BotScout extends PUPI_SRS_AbstractService
+class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const BOTSCOUT_KEY_SETTING = 'pupi_srs_botscout_key';
     /**

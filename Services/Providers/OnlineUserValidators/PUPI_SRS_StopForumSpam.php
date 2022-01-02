@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_StopForumSpam extends PUPI_SRS_AbstractService
+class PUPI_SRS_StopForumSpam extends PUPI_SRS_AbstractOnlineUserValidator
 {
     public function __construct()
     {

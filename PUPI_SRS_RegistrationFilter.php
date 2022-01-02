@@ -2,12 +2,8 @@
 
 class PUPI_SRS_RegistrationFilter
 {
-
     /** @var string */
     private $directory;
-
-    /** @var string */
-    private $monthsHistory = [];
 
     public function load_module($directory, $urlToRoot)
     {
@@ -24,39 +20,28 @@ class PUPI_SRS_RegistrationFilter
             return null;
         }
 
-        $isSpamUser = $this->checkServices($email, qa_remote_ip_address());
+        $isDuplicated = $this->checkDuplicateEmailValidators($email);
+
+        if ($isDuplicated) {
+            return qa_lang('users/email_exists');
+        }
+
+        $isSpamUser = $this->checkOnlineUserValidators($email, qa_remote_ip_address());
 
         return $isSpamUser ? qa_lang_html('users/email_invalid') : null;
     }
 
-    private function checkServices(string $email, string $ipAddress): bool
+    private function checkDuplicateEmailValidators(string $email): bool
     {
-        require_once 'Services/PUPI_SRS_ServiceManager.php';
+        require_once $this->directory . 'Services/PUPI_SRS_DuplicateEmailValidatorManager.php';
 
-        $services = PUPI_SRS_ServiceManager::getAllServices($this->directory);
-        $newStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($services);
+        return (new PUPI_SRS_DuplicateEmailValidatorManager($this->directory))->isDuplicated($email);
+    }
 
-        PUPI_SRS_ServiceManager::migrateOldStatsToNewStats($services, $newStats);
+    private function checkOnlineUserValidators(string $email, string $ipAddress): bool
+    {
+        require_once $this->directory . 'Services/PUPI_SRS_OnlineUserValidatorManager.php';
 
-        shuffle($services);
-        $isSpamUser = false;
-        foreach ($services as $service) {
-            $serviceName = $service->getName();
-            try {
-                $isSpamUser = $service->isSpamUser($email, $ipAddress);
-
-                PUPI_SRS_ServiceManager::incrementServiceStats($newStats, $serviceName, $isSpamUser);
-
-                if ($isSpamUser) {
-                    break;
-                }
-            } catch (Exception $e) {
-                error_log(sprintf('<PUPI_SRS - %s> %s', $serviceName, $e->getMessage()));
-            }
-        }
-
-        PUPI_SRS_ServiceManager::saveStats($newStats);
-
-        return $isSpamUser;
+        return (new PUPI_SRS_OnlineUserValidatorManager($this->directory))->isSpammer($email, $ipAddress);
     }
 }
