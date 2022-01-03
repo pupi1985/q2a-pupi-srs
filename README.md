@@ -16,6 +16,7 @@ Features
    * [ProjectHoneyPot](https://www.projecthoneypot.org)
    * [StopForumSpam](https://www.stopforumspam.com)
  * Each service is implemented as an internal plugin on its own, allowing for easy extension
+ * Rejects registrations with duplicated emails
  * Statistics for the last months are tracked for each service 
  * Internationalization support
  * No need for core hacks or plugin overrides
