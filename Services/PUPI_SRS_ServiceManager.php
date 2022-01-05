@@ -4,15 +4,15 @@ class PUPI_SRS_ServiceManager
 {
     const MONTHS_BACK_HISTORY = 3;
 
-    const DUPLICATE_EMAIL_VALIDATORS = 'DuplicateEmailValidators';
+    const EMAIL_VALIDATORS = 'EmailValidators';
     const ONLINE_USER_VALIDATORS = 'OnlineUserValidators';
 
-    public static function getAllDuplicateEmailValidators(string $pluginDirectory): array
+    public static function getAllEmailValidators(string $pluginDirectory): array
     {
         require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractValidator.php';
-        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractDuplicateEmailValidator.php';
+        require_once $pluginDirectory . '/Services/PUPI_SRS_AbstractEmailValidator.php';
 
-        return self::getAllServicesForCategory($pluginDirectory, self::DUPLICATE_EMAIL_VALIDATORS);
+        return self::getAllServicesForCategory($pluginDirectory, self::EMAIL_VALIDATORS);
     }
 
     public static function getAllOnlineUsersValidators(string $pluginDirectory): array

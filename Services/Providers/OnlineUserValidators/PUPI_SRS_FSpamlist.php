@@ -3,6 +3,7 @@
 class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const FSPAMLIST_KEY_SETTING = 'pupi_srs_fspamlist_key';
+
     /**
      * API key for the FSpamlist service.
      *
@@ -14,6 +15,14 @@ class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
     {
         $this->name = 'FSpamlist';
         $this->key = qa_opt(self::FSPAMLIST_KEY_SETTING);
+
+        $this->rateLimitEnabled = true;
+
+        $this->lastCheckSetting = 'pupi_srs_fspamlist_last_check';
+        $this->checkCountSetting = 'pupi_srs_fspamlist_check_count';
+        $this->checkLimitSetting = 'pupi_srs_fspamlist_check_limit';
+
+        $this->checkLimitDefaultValue = 10000;
     }
 
     /**
@@ -59,13 +68,30 @@ class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
         throw new Exception('Unknown error. Data returned: ' . $data);
     }
 
+    public function shouldResetCheckCount(): bool
+    {
+        $lastCheckDateTime = qa_opt($this->lastCheckSetting);
+
+        if (empty($lastCheckDateTime)) {
+            return true;
+        }
+
+        return !PUPI_SRS_AbstractOnlineUserValidator::isSameDay(date('Y-m-d H:i:s', qa_opt('db_time')), $lastCheckDateTime);
+    }
+
     public function getAdminFormFields(): array
     {
         return [
             self::FSPAMLIST_KEY_SETTING => [
-                'label' => 'FSpamlist key:', // Intentionally untranslated to make Providers be a single file
+                'label' => 'API key:', // Intentionally untranslated to make Providers be a single file
                 'value' => qa_html(qa_opt(self::FSPAMLIST_KEY_SETTING)),
                 'tags' => sprintf('name="%s"', self::FSPAMLIST_KEY_SETTING),
+            ],
+            $this->checkLimitSetting => [
+                'label' => 'API daily requests limit:', // Intentionally untranslated to make Providers be a single file
+                'value' => qa_html($this->getLimitCheck()),
+                'tags' => sprintf('name="%s"', $this->checkLimitSetting),
+                'note' => 'FSpamlist has a daily limit of 10,000 API requests',
             ],
         ];
     }
@@ -73,5 +99,6 @@ class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
     public function saveAdminForm()
     {
         qa_opt(self::FSPAMLIST_KEY_SETTING, qa_post_text(self::FSPAMLIST_KEY_SETTING));
+        qa_opt($this->checkLimitSetting, qa_post_text($this->checkLimitSetting));
     }
 }

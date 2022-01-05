@@ -3,6 +3,7 @@
 class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const BOTSCOUT_KEY_SETTING = 'pupi_srs_botscout_key';
+
     /**
      * API key for the BotScout service.
      *
@@ -14,6 +15,14 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
     {
         $this->name = 'BotScout';
         $this->key = qa_opt(self::BOTSCOUT_KEY_SETTING);
+
+        $this->rateLimitEnabled = true;
+
+        $this->lastCheckSetting = 'pupi_srs_botscout_last_check';
+        $this->checkCountSetting = 'pupi_srs_botscout_check_count';
+        $this->checkLimitSetting = 'pupi_srs_botscout_check_limit';
+
+        $this->checkLimitDefaultValue = 400;
     }
 
     /**
@@ -35,6 +44,8 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
         if (strpos($data, '! ') === 0) {
             throw new Exception('API Error: ' . substr($data, 2));
         }
+
+        $this->incrementChecksDone();
 
         $dataExploded = explode('|', $data);
 
@@ -59,13 +70,30 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
         throw new Exception('Unknown error. Data returned: ' . $data);
     }
 
+    public function shouldResetCheckCount(): bool
+    {
+        $lastCheckDateTime = qa_opt($this->lastCheckSetting);
+
+        if (empty($lastCheckDateTime)) {
+            return true;
+        }
+
+        return !PUPI_SRS_AbstractOnlineUserValidator::isSameDay(date('Y-m-d H:i:s', qa_opt('db_time')), $lastCheckDateTime);
+    }
+
     public function getAdminFormFields(): array
     {
         return [
             self::BOTSCOUT_KEY_SETTING => [
-                'label' => 'BotScout key:', // Intentionally untranslated to make Providers be a single file
+                'label' => 'API key:', // Intentionally untranslated to make Providers be a single file
                 'value' => qa_html(qa_opt(self::BOTSCOUT_KEY_SETTING)),
                 'tags' => sprintf('name="%s"', self::BOTSCOUT_KEY_SETTING),
+            ],
+            $this->checkLimitSetting => [
+                'label' => 'API daily requests limit:', // Intentionally untranslated to make Providers be a single file
+                'value' => qa_html($this->getLimitCheck()),
+                'tags' => sprintf('name="%s"', $this->checkLimitSetting),
+                'note' => 'BotScout has a daily limit of "normally 300 per day" so 400 is a decent default value',
             ],
         ];
     }
@@ -73,5 +101,6 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
     public function saveAdminForm()
     {
         qa_opt(self::BOTSCOUT_KEY_SETTING, qa_post_text(self::BOTSCOUT_KEY_SETTING));
+        qa_opt($this->checkLimitSetting, qa_post_text($this->checkLimitSetting));
     }
 }

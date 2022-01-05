@@ -9,14 +9,4 @@ abstract class PUPI_SRS_AbstractOnlineUserValidator extends PUPI_SRS_AbstractVal
      * @throws Exception
      */
     public abstract function isSpamUser(string $email, string $ip): bool;
-
-    /**
-     * Return all fields needed to display the admin form. Array keys should be included.
-     */
-    public abstract function getAdminFormFields(): array;
-
-    /**
-     * Executed when saving the admin form.
-     */
-    public abstract function saveAdminForm();
 }

@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'admin_emails_stats_title' => 'Duplicate email validators stats',
+    'admin_emails_stats_title' => 'Email validators stats',
     'admin_online_stats_title' => 'Online validators stats',
     'admin_emails_stats_confirmation_warning' => 'The following setting from the admin/spam submenu needs to be enabled in order for the email confirmation to work: ^',
     'admin_services_stats_total' => 'Total',

@@ -1,6 +1,6 @@
 <?php
 
-abstract class PUPI_SRS_AbstractDuplicateEmailValidator extends PUPI_SRS_AbstractValidator
+abstract class PUPI_SRS_AbstractEmailValidator extends PUPI_SRS_AbstractValidator
 {
     /**
      * Return whether the email can be processed.

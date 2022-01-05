@@ -19,7 +19,8 @@ class PUPI_SRS_OnlineUserValidatorManager
 
         PUPI_SRS_ServiceManager::migrateOldStatsToNewStats($services, $newStats, 'pupi_srs_services_stats');
 
-        shuffle($services);
+        $services = $this->getUsableServices($services);
+
         $isSpamUser = false;
         foreach ($services as $service) {
             $serviceName = $service->getName();
@@ -27,6 +28,7 @@ class PUPI_SRS_OnlineUserValidatorManager
                 $isSpamUser = $service->isSpamUser($email, $ipAddress);
 
                 PUPI_SRS_ServiceManager::incrementServiceStats($newStats, $serviceName, $isSpamUser);
+                $service->incrementChecksDone();
 
                 if ($isSpamUser) {
                     break;
@@ -39,5 +41,31 @@ class PUPI_SRS_OnlineUserValidatorManager
         PUPI_SRS_ServiceManager::saveStats('pupi_srs_services_stats', $newStats);
 
         return $isSpamUser;
+    }
+
+    /**
+     * @param array $services
+     *
+     * @return array
+     */
+    private function getUsableServices(array $services): array
+    {
+        $services = array_filter($services, function ($service) {
+            if ($service->shouldResetCheckCount()) {
+                $service->resetCheckCount();
+
+                return true;
+            } else if ($service->getRemainingChecks() > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        });
+
+        usort($services, function (PUPI_SRS_AbstractOnlineUserValidator $s1, PUPI_SRS_AbstractOnlineUserValidator $s2) {
+            return $s2->getRemainingChecks() - $s1->getRemainingChecks();
+        });
+
+        return $services;
     }
 }

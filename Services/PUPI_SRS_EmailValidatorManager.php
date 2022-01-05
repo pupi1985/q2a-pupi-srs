@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_DuplicateEmailValidatorManager
+class PUPI_SRS_EmailValidatorManager
 {
     /** @var string */
     private $directory;
@@ -10,7 +10,7 @@ class PUPI_SRS_DuplicateEmailValidatorManager
         $this->directory = $directory;
     }
 
-    public function isDuplicated(string $email): bool
+    public function isValid(string $email): bool
     {
         // If Q2A is going to flag it as duplicate anyways, avoid checking and incrementing counts
         if ($this->isDuplicatedForQ2A($email)) {
@@ -19,7 +19,7 @@ class PUPI_SRS_DuplicateEmailValidatorManager
 
         require_once $this->directory . 'Services/PUPI_SRS_ServiceManager.php';
 
-        $services = PUPI_SRS_ServiceManager::getAllDuplicateEmailValidators($this->directory);
+        $services = PUPI_SRS_ServiceManager::getAllEmailValidators($this->directory);
 
         $standarizationResults = $this->getStandarizationResults($email, $services);
 

@@ -3,6 +3,7 @@
 class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractOnlineUserValidator
 {
     const PROJECTHONEYPOT_KEY_SETTING = 'pupi_srs_projecthoneypot_key';
+
     /**
      * API key for the ProjectHoneyPot service.
      *
@@ -46,6 +47,11 @@ class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractOnlineUserValidator
 
         if ((int)$explodedResponse[0] !== 127) {
             $this->throwUnknownErrorException($response);
+        }
+
+        // This is a search engine, not a bot
+        if ((int)$explodedResponse[3] === 0) {
+            return false;
         }
 
         // If more than 120 days have passed since the last report

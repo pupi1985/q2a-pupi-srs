@@ -1,6 +1,6 @@
 <?php
 
-class PUPI_SRS_Gmail extends PUPI_SRS_AbstractDuplicateEmailValidator
+class PUPI_SRS_Gmail extends PUPI_SRS_AbstractEmailValidator
 {
     public function __construct()
     {

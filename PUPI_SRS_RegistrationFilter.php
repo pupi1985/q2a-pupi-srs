@@ -20,9 +20,9 @@ class PUPI_SRS_RegistrationFilter
             return null;
         }
 
-        $isDuplicated = $this->checkDuplicateEmailValidators($email);
+        $isValid = $this->checkEmailValidators($email);
 
-        if ($isDuplicated) {
+        if ($isValid) {
             return qa_lang('users/email_exists');
         }
 
@@ -31,11 +31,11 @@ class PUPI_SRS_RegistrationFilter
         return $isSpamUser ? qa_lang_html('users/email_invalid') : null;
     }
 
-    private function checkDuplicateEmailValidators(string $email): bool
+    private function checkEmailValidators(string $email): bool
     {
-        require_once $this->directory . 'Services/PUPI_SRS_DuplicateEmailValidatorManager.php';
+        require_once $this->directory . 'Services/PUPI_SRS_EmailValidatorManager.php';
 
-        return (new PUPI_SRS_DuplicateEmailValidatorManager($this->directory))->isDuplicated($email);
+        return (new PUPI_SRS_EmailValidatorManager($this->directory))->isValid($email);
     }
 
     private function checkOnlineUserValidators(string $email, string $ipAddress): bool

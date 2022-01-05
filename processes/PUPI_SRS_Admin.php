@@ -18,22 +18,22 @@ class PUPI_SRS_Admin
     {
         require_once $this->directory . 'Services/PUPI_SRS_ServiceManager.php';
 
-        $duplicateEmailValidators = PUPI_SRS_ServiceManager::getAllDuplicateEmailValidators($this->directory);
+        $emailValidators = PUPI_SRS_ServiceManager::getAllEmailValidators($this->directory);
         $onlineUsersValidators = PUPI_SRS_ServiceManager::getAllOnlineUsersValidators($this->directory);
 
         $ok = null;
         if (qa_clicked(self::RESET_ALL_STATS_BUTTON)) {
-            $duplicateEmailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($duplicateEmailValidators);
+            $emailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($emailValidators);
             $onlineUsersValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($onlineUsersValidators);
 
-            qa_opt('pupi_srs_emails_stats', json_encode($duplicateEmailValidatorStats));
+            qa_opt('pupi_srs_emails_stats', json_encode($emailValidatorStats));
             qa_opt('pupi_srs_services_stats', json_encode($onlineUsersValidatorStats));
 
             $ok = qa_lang_html('pupi_srs/admin_reset_all_stats_success_message');
         } else {
-            $duplicateEmailValidatorStats = json_decode(qa_opt('pupi_srs_emails_stats'), true);
-            if (is_null($duplicateEmailValidatorStats)) {
-                $duplicateEmailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($duplicateEmailValidators);
+            $emailValidatorStats = json_decode(qa_opt('pupi_srs_emails_stats'), true);
+            if (is_null($emailValidatorStats)) {
+                $emailValidatorStats = PUPI_SRS_ServiceManager::createStatsSettingsForSevices($emailValidators);
             }
             $onlineUsersValidatorStats = json_decode(qa_opt('pupi_srs_services_stats'), true);
             if (is_null($onlineUsersValidatorStats)) {
@@ -50,7 +50,8 @@ class PUPI_SRS_Admin
 
         return [
             'ok' => $ok,
-            'fields' => $this->getFields($onlineUsersValidators, $duplicateEmailValidatorStats, $onlineUsersValidatorStats),
+            'style' => 'wide',
+            'fields' => $this->getFields($onlineUsersValidators, $emailValidatorStats, $onlineUsersValidatorStats),
             'buttons' => $this->getButtons(),
         ];
     }
@@ -127,7 +128,7 @@ class PUPI_SRS_Admin
         return $html; // pupi_srs_services-stats
     }
 
-    private function getEmailConfirmationDisabledWarning()
+    private function getEmailConfirmationDisabledWarning(): string
     {
         $html = '<div class="pupi_srs_email-confirmation-warning">';
         $html .= qa_lang_html_sub(
@@ -139,15 +140,34 @@ class PUPI_SRS_Admin
         return $html;
     }
 
-    private function getFields(array $onlineUsersValidators, array $duplicateEmailValidatorStats, array $onlineUsersValidatorStats): array
+    private function getFields(array $onlineUsersValidators, array $emailValidatorStats, array $onlineUsersValidatorStats): array
     {
         $result = [];
 
         foreach ($onlineUsersValidators as $service) {
-            $result += $service->getAdminFormFields();
+            $keyServiceName = strtolower($service->getName());
+            $fields = $service->getAdminFormFields();
+            if ($service->isRateLimitEnabled()) {
+                $fields += [
+                    $keyServiceName . '-remaining-checksk' => [
+                        'type' => 'static',
+                        'label' => 'Remaining checks:',
+                        'value' => qa_html($service->getRemainingChecks()),
+                    ],
+                ];
+            }
+            if (!empty($fields)) {
+                $fields = [
+                        $keyServiceName . '-title' => [
+                            'label' => sprintf('<h3>%s</h3>', $service->getName()),
+                            'type' => 'static',
+                        ],
+                    ] + $fields;
+            }
+            $result += $fields;
         }
 
-        $html = $this->getServicesTable($duplicateEmailValidatorStats['providers'], qa_lang_html('pupi_srs/admin_emails_stats_title'));
+        $html = $this->getServicesTable($emailValidatorStats['providers'], qa_lang_html('pupi_srs/admin_emails_stats_title'));
 
         if (!qa_opt('confirm_user_emails')) {
             $html .= $this->getEmailConfirmationDisabledWarning();
@@ -156,6 +176,7 @@ class PUPI_SRS_Admin
         $html .= $this->getServicesTable($onlineUsersValidatorStats['providers'], qa_lang_html('pupi_srs/admin_online_stats_title'));
 
         $result['admin_settings'] = [
+            'style' => 'tall',
             'type' => 'custom',
             'html' => $html,
         ];
