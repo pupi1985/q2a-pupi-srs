@@ -35,9 +35,9 @@ class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
         }
 
         $url = sprintf('https://fspamlist.com/api.php?spammer=%s,,%s&key=%s&json', urlencode($email), urlencode($ip), urlencode($this->key));
-        $data = qa_retrieve_url($url);
+        $dataString = qa_retrieve_url($url);
 
-        $data = json_decode($data, true);
+        $data = json_decode($dataString, true);
 
         if (empty($data)) {
             throw new Exception('Error fetching data from server');
