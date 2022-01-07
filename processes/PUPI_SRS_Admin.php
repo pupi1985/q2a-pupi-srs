@@ -128,18 +128,6 @@ class PUPI_SRS_Admin
         return $html; // pupi_srs_services-stats
     }
 
-    private function getEmailConfirmationDisabledWarning(): string
-    {
-        $html = '<div class="pupi_srs_email-confirmation-warning">';
-        $html .= qa_lang_html_sub(
-            'pupi_srs/admin_emails_stats_confirmation_warning',
-            '<span class="pupi_srs_email-confirmation-warning-setting">' . qa_lang_html('options/confirm_user_emails') . '</span>'
-        );
-        $html .= '</div>';
-
-        return $html;
-    }
-
     private function getFields(array $onlineUsersValidators, array $emailValidatorStats, array $onlineUsersValidatorStats): array
     {
         $result = [];
@@ -168,11 +156,6 @@ class PUPI_SRS_Admin
         }
 
         $html = $this->getServicesTable($emailValidatorStats['providers'], qa_lang_html('pupi_srs/admin_emails_stats_title'));
-
-        if (!qa_opt('confirm_user_emails')) {
-            $html .= $this->getEmailConfirmationDisabledWarning();
-        }
-
         $html .= $this->getServicesTable($onlineUsersValidatorStats['providers'], qa_lang_html('pupi_srs/admin_online_stats_title'));
 
         $result['admin_settings'] = [

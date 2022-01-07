@@ -10,11 +10,17 @@ class PUPI_SRS_EmailValidatorManager
         $this->directory = $directory;
     }
 
-    public function isValid(string $email): bool
+    /**
+     * Return an array with the keys 'isValid' and 'registeredEmail'. First value determines if the email
+     * was found and the second one the first email that attempted a registration or the first email that
+     * was confirmed.
+     *
+     */
+    public function getDuplicateRecord(string $email): array
     {
         // If Q2A is going to flag it as duplicate anyways, avoid checking and incrementing counts
         if ($this->isDuplicatedForQ2A($email)) {
-            return true;
+            return ['isValid' => false];
         }
 
         require_once $this->directory . 'Services/PUPI_SRS_ServiceManager.php';
@@ -24,7 +30,7 @@ class PUPI_SRS_EmailValidatorManager
         $standarizationResults = $this->getStandarizationResults($email, $services);
 
         if (is_null($standarizationResults['standarizedByService'])) {
-            return false;
+            return ['isValid' => true];
         }
 
         require_once $this->directory . 'Models/PUPI_SRS_StandarizedEmailsModel.php';
@@ -34,13 +40,17 @@ class PUPI_SRS_EmailValidatorManager
 
         $foundInDatabase = isset($standarizedEmailRecord);
 
-        if ($foundInDatabase && !$standarizedEmailRecord['multiple_attempts']) {
-            $standarizedEmailsModel->insertUpdateEmailInDatabase($standarizationResults['email']);
-        }
+        $standarizedEmailsModel->insertUpdateEmailInDatabase(
+            $standarizationResults['email'],
+            $foundInDatabase ? $standarizedEmailRecord['registered_email'] : $email
+        );
 
         $this->updateStats($services, $standarizationResults['standarizedByService'], $foundInDatabase);
 
-        return $foundInDatabase;
+        return [
+            'isValid' => !$foundInDatabase,
+            'registeredEmail' => $standarizedEmailRecord['registered_email'] ?? null,
+        ];
     }
 
     private function updateStats(array $services, $serviceName, bool $foundInDatabase)

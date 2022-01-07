@@ -20,28 +20,36 @@ class PUPI_SRS_RegistrationFilter
             return null;
         }
 
-        $isValid = $this->checkEmailValidators($email);
+        $message = $this->getMessageFromEmailValidators($email);
 
-        if ($isValid) {
-            return qa_lang('users/email_exists');
+        if (isset($message)) {
+            return $message;
         }
 
-        $isSpamUser = $this->checkOnlineUserValidators($email, qa_remote_ip_address());
-
-        return $isSpamUser ? qa_lang_html('users/email_invalid') : null;
+        return $this->getMessageFromOnlineUserValidators($email, qa_remote_ip_address());
     }
 
-    private function checkEmailValidators(string $email): bool
+    private function getMessageFromEmailValidators(string $email)
     {
         require_once $this->directory . 'Services/PUPI_SRS_EmailValidatorManager.php';
 
-        return (new PUPI_SRS_EmailValidatorManager($this->directory))->isValid($email);
+        $duplicateRecord = (new PUPI_SRS_EmailValidatorManager($this->directory))->getDuplicateRecord($email);
+
+        if ($duplicateRecord['isValid']) {
+            return null;
+        } else {
+            return isset($duplicateRecord['registeredEmail'])
+                ? qa_lang_sub('pupi_srs/email_already_registered', $duplicateRecord['registeredEmail'])
+                : qa_lang('users/email_exists');
+        }
     }
 
-    private function checkOnlineUserValidators(string $email, string $ipAddress): bool
+    private function getMessageFromOnlineUserValidators(string $email, string $ipAddress)
     {
         require_once $this->directory . 'Services/PUPI_SRS_OnlineUserValidatorManager.php';
 
-        return (new PUPI_SRS_OnlineUserValidatorManager($this->directory))->isSpammer($email, $ipAddress);
+        $isSpamUser = (new PUPI_SRS_OnlineUserValidatorManager($this->directory))->isSpammer($email, $ipAddress);
+
+        return $isSpamUser ? qa_lang_html('users/email_invalid') : null;
     }
 }

@@ -2,7 +2,7 @@
 
 class PUPI_SRS_Setup
 {
-    const LATEST_DB_VERSION = 1;
+    const LATEST_DB_VERSION = 2;
     const SETTING_PLUGIN_DB_VERSION = 'pupi_srs_plugin_db_version';
 
     public function init_queries($tableslc)
@@ -27,6 +27,13 @@ class PUPI_SRS_Setup
                             ') ENGINE = InnoDB CHARSET = utf8';
                     }
                     $queries[] = $this->getUpdateVersionQuery(1);
+                case 2:
+                    $queries[] = 'DELETE FROM `^pupi_srs_standarized_emails`';
+                    $queries[] = 'ALTER TABLE `^pupi_srs_standarized_emails` DROP COLUMN `multiple_attempts`';
+                    $queries[] = 'ALTER TABLE `^pupi_srs_standarized_emails` ADD COLUMN `registered_email` VARCHAR(' . QA_DB_MAX_EMAIL_LENGTH . ') NOT NULL AFTER `email`';
+                    $queries[] = 'ALTER TABLE `^pupi_srs_standarized_emails` ADD COLUMN `last_registration_attempt` DATE NOT NULL AFTER `registered_email`';
+
+                    $queries[] = $this->getUpdateVersionQuery(2);
             }
         }
 

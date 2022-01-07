@@ -17,6 +17,11 @@ class PUPI_SRS_EventListener
 
         $email = strtolower($params['email']);
 
+        $this->insertUpdateUserEmail($email);
+    }
+
+    private function insertUpdateUserEmail(string $email)
+    {
         require_once $this->directory . 'Services/PUPI_SRS_ServiceManager.php';
         require_once $this->directory . 'Services/PUPI_SRS_EmailValidatorManager.php';
         require_once $this->directory . 'Models/PUPI_SRS_StandarizedEmailsModel.php';
@@ -25,6 +30,10 @@ class PUPI_SRS_EventListener
 
         $standarizationResults = (new PUPI_SRS_EmailValidatorManager($this->directory))->getStandarizationResults($email, $services);
 
-        (new PUPI_SRS_StandarizedEmailsModel())->insertUpdateEmailInDatabase($standarizationResults['email']);
+        if (is_null($standarizationResults['standarizedByService'])) {
+            return;
+        }
+
+        (new PUPI_SRS_StandarizedEmailsModel())->insertUpdateEmailInDatabase($standarizationResults['email'], $email);
     }
 }
