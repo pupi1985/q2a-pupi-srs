@@ -13,8 +13,10 @@ Features
  * SPAM users are tested against well-known services
    * [BotScout](https://botscout.com)
    * [FSpamlist](https://fspamlist.com)
+   * [IsTempMail](https://www.istempmail.com)
    * [ProjectHoneyPot](https://www.projecthoneypot.org)
    * [StopForumSpam](https://www.stopforumspam.com)
+   * [VerifierMeetChopra](https://verifier.meetchopra.com)
  * Each service is implemented as an internal plugin on its own, allowing for easy extension
  * Rejects registrations with duplicate emails
  * Rejects registrations with trash emails
