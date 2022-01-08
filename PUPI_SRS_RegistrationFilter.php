@@ -33,14 +33,17 @@ class PUPI_SRS_RegistrationFilter
     {
         require_once $this->directory . 'Services/PUPI_SRS_EmailValidatorManager.php';
 
-        $duplicateRecord = (new PUPI_SRS_EmailValidatorManager($this->directory))->getDuplicateRecord($email);
+        $verificationResult = (new PUPI_SRS_EmailValidatorManager($this->directory))->getVerificationResult($email);
 
-        if ($duplicateRecord['isValid']) {
-            return null;
-        } else {
-            return isset($duplicateRecord['registeredEmail'])
-                ? qa_lang_sub('pupi_srs/email_already_registered', $duplicateRecord['registeredEmail'])
-                : qa_lang('users/email_exists');
+        switch ($verificationResult['status']) {
+            case 'q2a-duplicate':
+                return qa_lang('users/email_exists');
+            case 'service-duplicate':
+                return qa_lang_sub('pupi_srs/email_already_registered', $verificationResult['registeredEmail']);
+            case 'invalid':
+                return qa_lang('users/email_invalid');
+            default: // 'valid'
+                return null;
         }
     }
 

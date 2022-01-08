@@ -8,6 +8,11 @@ abstract class PUPI_SRS_AbstractEmailValidator extends PUPI_SRS_AbstractValidato
     public abstract function canProcessEmail(string $email, string $user, string $domain): string;
 
     /**
+     * Return whether the email is sintactically valid.
+     */
+    public abstract function isValid(string $email, string $user, string $domain): bool;
+
+    /**
      * Return the email in a standard format.
      */
     public abstract function getStandarizedEmail(string $email, string $user, string $domain): string;
