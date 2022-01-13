@@ -3,11 +3,19 @@
 class PUPI_SRS_EmailValidatorManager
 {
     /** @var string */
+    private static $standarizationResultsCache = null;
+
+    /** @var string */
     private $directory;
 
     public function __construct($directory)
     {
         $this->directory = $directory;
+    }
+
+    public static function getStandarizationResultsCache()
+    {
+        return self::$standarizationResultsCache;
     }
 
     /**
@@ -36,6 +44,7 @@ class PUPI_SRS_EmailValidatorManager
         }
 
         $standarizationResults = $this->getStandarizationResults($email, $services);
+        self::$standarizationResultsCache = $standarizationResults;
 
         if (is_null($standarizationResults['standarizedByService'])) {
             return ['status' => 'valid'];
@@ -48,10 +57,12 @@ class PUPI_SRS_EmailValidatorManager
 
         $foundInDatabase = isset($standarizedEmailRecord);
 
-        $standarizedEmailsModel->insertUpdateEmailInDatabase(
-            $standarizationResults['email'],
-            $foundInDatabase ? $standarizedEmailRecord['registered_email'] : $email
-        );
+        if ($foundInDatabase) {
+            $standarizedEmailsModel->insertUpdateEmailInDatabase(
+                $standarizationResults['email'],
+                $standarizedEmailRecord['registered_email']
+            );
+        }
 
         $this->updateStats($services, $standarizationResults['standarizedByService'], $foundInDatabase);
 
