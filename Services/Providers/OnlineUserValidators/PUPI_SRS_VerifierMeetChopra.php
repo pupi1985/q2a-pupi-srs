@@ -54,7 +54,7 @@ class PUPI_SRS_VerifierMeetChopra extends PUPI_SRS_AbstractOnlineUserValidator
     {
         return [
             self::VERIFIERMEETCHOPRA_KEY_SETTING => [
-                'label' => 'VerifierMeetChopra key:', // Intentionally untranslated to make Providers be a single file
+                'label' => 'API key:', // Intentionally untranslated to make Providers be a single file
                 'value' => qa_html(qa_opt(self::VERIFIERMEETCHOPRA_KEY_SETTING)),
                 'tags' => sprintf('name="%s"', self::VERIFIERMEETCHOPRA_KEY_SETTING),
             ],

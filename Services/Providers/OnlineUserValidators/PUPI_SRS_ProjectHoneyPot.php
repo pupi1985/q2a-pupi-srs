@@ -79,7 +79,7 @@ class PUPI_SRS_ProjectHoneyPot extends PUPI_SRS_AbstractOnlineUserValidator
     {
         return [
             self::PROJECTHONEYPOT_KEY_SETTING => [
-                'label' => 'ProjectHoneyPot key:', // Intentionally untranslated to make Providers be a single file
+                'label' => 'API key:', // Intentionally untranslated to make Providers be a single file
                 'value' => qa_html(qa_opt(self::PROJECTHONEYPOT_KEY_SETTING)),
                 'tags' => sprintf('name="%s"', self::PROJECTHONEYPOT_KEY_SETTING),
             ],

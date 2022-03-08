@@ -15,6 +15,14 @@ class PUPI_SRS_IsTempMail extends PUPI_SRS_AbstractOnlineUserValidator
     {
         $this->name = 'IsTempMail';
         $this->key = qa_opt(self::ISTEMPMAIL_KEY_SETTING);
+
+        $this->rateLimitEnabled = true;
+
+        $this->lastCheckSetting = 'pupi_srs_istempmail_last_check';
+        $this->checkCountSetting = 'pupi_srs_istempmail_check_count';
+        $this->checkLimitSetting = 'pupi_srs_istempmail_check_limit';
+
+        $this->checkLimitDefaultValue = 200;
     }
 
     /**
@@ -50,13 +58,30 @@ class PUPI_SRS_IsTempMail extends PUPI_SRS_AbstractOnlineUserValidator
         return false;
     }
 
+    public function shouldResetCheckCount(): bool
+    {
+        $lastCheckDateTime = qa_opt($this->lastCheckSetting);
+
+        if (empty($lastCheckDateTime)) {
+            return true;
+        }
+
+        return !PUPI_SRS_AbstractOnlineUserValidator::isSameMonth(date('Y-m-d H:i:s', qa_opt('db_time')), $lastCheckDateTime);
+    }
+
     public function getAdminFormFields(): array
     {
         return [
             self::ISTEMPMAIL_KEY_SETTING => [
-                'label' => 'IsTempMail key:', // Intentionally untranslated to make Providers be a single file
+                'label' => 'API key:', // Intentionally untranslated to make Providers be a single file
                 'value' => qa_html(qa_opt(self::ISTEMPMAIL_KEY_SETTING)),
                 'tags' => sprintf('name="%s"', self::ISTEMPMAIL_KEY_SETTING),
+            ],
+            $this->checkLimitSetting => [
+                'label' => 'API monthly requests limit:', // Intentionally untranslated to make Providers be a single file
+                'value' => qa_html($this->getLimitCheck()),
+                'tags' => sprintf('name="%s"', $this->checkLimitSetting),
+                'note' => 'IsTempMail has a monthly limit of 200 API requests',
             ],
         ];
     }
@@ -64,5 +89,6 @@ class PUPI_SRS_IsTempMail extends PUPI_SRS_AbstractOnlineUserValidator
     public function saveAdminForm()
     {
         qa_opt(self::ISTEMPMAIL_KEY_SETTING, qa_post_text(self::ISTEMPMAIL_KEY_SETTING));
+        qa_opt($this->checkLimitSetting, qa_post_text($this->checkLimitSetting));
     }
 }
