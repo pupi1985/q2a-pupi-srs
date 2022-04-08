@@ -10,6 +10,10 @@ class PUPI_SRS_EventListener
         $this->directory = $directory;
     }
 
+    /**
+     * Note login modules fire the "u_register" event but don't fire the filter_email method
+     * of filter modules.
+     */
     public function process_event($event, $userId, $handle, $cookieId, $params)
     {
         if ($event !== 'u_confirmed' && $event !== 'u_register') {
@@ -26,7 +30,9 @@ class PUPI_SRS_EventListener
             ? PUPI_SRS_EmailValidatorManager::getStandarizationResultsCache()
             : (new PUPI_SRS_EmailValidatorManager($this->directory))->getStandarizationResults($email, $services);
 
-        if (is_null($standarizationResults['standarizedByService'])) {
+        // $standarizationResults is null when logging in with login modules
+
+        if (is_null($standarizationResults) || is_null($standarizationResults['standarizedByService'])) {
             return;
         }
 

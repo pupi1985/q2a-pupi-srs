@@ -66,14 +66,12 @@ class PUPI_SRS_EmailValidatorManager
 
         $this->updateStats($services, $standarizationResults['standarizedByService'], $foundInDatabase);
 
-        if ($foundInDatabase) {
-            return [
+        return $foundInDatabase ?
+            [
                 'status' => 'service-duplicate',
                 'registeredEmail' => $standarizedEmailRecord['registered_email'] ?? null,
-            ];;
-        } else {
-            return ['status' => 'valid'];
-        }
+            ]
+            : ['status' => 'valid'];
     }
 
     private function updateStats(array $services, $serviceName, bool $foundInDatabase)
