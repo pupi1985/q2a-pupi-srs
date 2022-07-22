@@ -64,12 +64,26 @@ abstract class PUPI_SRS_AbstractValidator
             return;
         }
 
-        $currentDateTime = date('Y-m-d H:i:s', qa_opt('db_time'));
-        qa_opt($this->lastCheckSetting, $currentDateTime);
+        $this->updateLastCheckedSetting();
 
         $checkCount = (int)qa_opt($this->checkCountSetting);
         qa_opt($this->checkCountSetting, $checkCount + 1);
     }
+
+    /**
+     * Remove all pending checks.
+     */
+    public function removeAllPendingChecks()
+    {
+        if (!$this->rateLimitEnabled) {
+            return;
+        }
+
+        $this->updateLastCheckedSetting();
+
+        qa_opt($this->checkCountSetting, $this->getLimitCheck());
+    }
+
 
     /**
      * Return the checkLimitSetting value applying the default value, if necessary.
@@ -121,5 +135,11 @@ abstract class PUPI_SRS_AbstractValidator
     public function isRateLimitEnabled(): bool
     {
         return $this->rateLimitEnabled;
+    }
+
+    private function updateLastCheckedSetting()
+    {
+        $currentDateTime = date('Y-m-d H:i:s', qa_opt('db_time'));
+        qa_opt($this->lastCheckSetting, $currentDateTime);
     }
 }

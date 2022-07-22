@@ -43,6 +43,12 @@ class PUPI_SRS_IsTempMail extends PUPI_SRS_AbstractOnlineUserValidator
             throw new Exception('Error fetching data from server');
         }
 
+        if (isset($data['error_description']) && strpos($data['error_description'], 'upgrade your account') !== false) {
+            $this->removeAllPendingChecks();
+
+            return false;
+        }
+
         if (!isset($data['blocked'])) {
             throw new Exception('Unknown error. Data returned: ' . $dataString);
         }
