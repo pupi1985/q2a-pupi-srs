@@ -34,7 +34,7 @@ class PUPI_SRS_BotScout extends PUPI_SRS_AbstractOnlineUserValidator
             throw new Exception('Invalid API key');
         }
 
-        $url = sprintf('http://botscout.com/test/?multi&mail=%s&ip=%s&key=%s', urlencode($email), urlencode($ip), urlencode($this->key));
+        $url = sprintf('http://botscout.com/test/?multi&mail=%s&ip=%s&key=%s', rawurlencode($email), rawurlencode($ip), rawurlencode($this->key));
         $data = qa_retrieve_url($url);
 
         if (empty($data)) {

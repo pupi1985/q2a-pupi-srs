@@ -20,7 +20,7 @@ class PUPI_SRS_StopForumSpam extends PUPI_SRS_AbstractOnlineUserValidator
      */
     public function isSpamUser(string $email, string $ip): bool
     {
-        $url = sprintf('http://api.stopforumspam.org/api?email=%s&ip=%s&json', urlencode($email), urlencode($ip));
+        $url = sprintf('http://api.stopforumspam.org/api?email=%s&ip=%s&json', rawurlencode($email), rawurlencode($ip));
         $data = qa_retrieve_url($url);
 
         $data = json_decode($data, true);

@@ -26,7 +26,7 @@ class PUPI_SRS_VerifierMeetChopra extends PUPI_SRS_AbstractOnlineUserValidator
             throw new Exception('Invalid API key');
         }
 
-        $url = sprintf('https://verifier.meetchopra.com/verify/%s?token=%s', urlencode($email), urlencode($this->key));
+        $url = sprintf('https://verifier.meetchopra.com/verify/%s?token=%s', rawurlencode($email), rawurlencode($this->key));
         $dataString = qa_retrieve_url($url);
 
         $data = json_decode($dataString, true);

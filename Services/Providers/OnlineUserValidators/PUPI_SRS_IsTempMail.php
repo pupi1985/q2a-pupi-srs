@@ -34,7 +34,7 @@ class PUPI_SRS_IsTempMail extends PUPI_SRS_AbstractOnlineUserValidator
             throw new Exception('Invalid API key');
         }
 
-        $url = sprintf('https://www.istempmail.com/api/check/%s/%s', urlencode($this->key), urlencode($email));
+        $url = sprintf('https://www.istempmail.com/api/check/%s/%s', rawurlencode($this->key), rawurlencode($email));
         $dataString = qa_retrieve_url($url);
 
         $data = json_decode($dataString, true);

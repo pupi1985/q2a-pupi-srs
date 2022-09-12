@@ -34,7 +34,7 @@ class PUPI_SRS_FSpamlist extends PUPI_SRS_AbstractOnlineUserValidator
             throw new Exception('Invalid API key');
         }
 
-        $url = sprintf('https://fspamlist.com/api.php?spammer=%s,,%s&key=%s&json', urlencode($email), urlencode($ip), urlencode($this->key));
+        $url = sprintf('https://fspamlist.com/api.php?spammer=%s,,%s&key=%s&json', rawurlencode($email), rawurlencode($ip), rawurlencode($this->key));
         $dataString = qa_retrieve_url($url);
 
         $data = json_decode($dataString, true);
