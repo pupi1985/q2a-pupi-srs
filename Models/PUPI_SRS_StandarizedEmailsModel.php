@@ -20,4 +20,17 @@ class PUPI_SRS_StandarizedEmailsModel
 
         qa_db_query_sub($sql, $email, $registeredEmail);
     }
+
+    public function deleteEmails(array $emails)
+    {
+        if (empty($emails)) {
+            return;
+        }
+
+        $sql =
+            'DELETE FROM `^pupi_srs_standarized_emails` ' .
+            'WHERE `email` IN ($)';
+
+        qa_db_query_sub($sql, $emails);
+    }
 }

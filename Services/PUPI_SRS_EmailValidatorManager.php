@@ -26,7 +26,7 @@ class PUPI_SRS_EmailValidatorManager
      * for one of the services, 'invalid' means the email is syntactically incorrect and 'valid' means the email
      * is syntactically correct and has no duplicate.
      */
-    public function getVerificationResult(string $email): array
+    public function getVerificationResult(string $email, $updateStats = true): array
     {
         // If Q2A is going to flag it as duplicate anyways, avoid checking and incrementing counts
         if ($this->isDuplicatedForQ2A($email)) {
@@ -57,14 +57,16 @@ class PUPI_SRS_EmailValidatorManager
 
         $foundInDatabase = isset($standarizedEmailRecord);
 
-        if ($foundInDatabase) {
-            $standarizedEmailsModel->insertUpdateEmailInDatabase(
-                $standarizationResults['email'],
-                $standarizedEmailRecord['registered_email']
-            );
-        }
+        if ($updateStats) {
+            if ($foundInDatabase) {
+                $standarizedEmailsModel->insertUpdateEmailInDatabase(
+                    $standarizationResults['email'],
+                    $standarizedEmailRecord['registered_email']
+                );
+            }
 
-        $this->updateStats($services, $standarizationResults['standarizedByService'], $foundInDatabase);
+            $this->updateStats($services, $standarizationResults['standarizedByService'], $foundInDatabase);
+        }
 
         return $foundInDatabase ?
             [

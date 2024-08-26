@@ -42,6 +42,7 @@ class PUPI_SRS_Admin
 
             if (qa_clicked(self::SAVE_BUTTON)) {
                 $this->saveForm($onlineUsersValidators);
+                $this->unblockEmailAddresses();
                 $ok = qa_lang_html('admin/options_saved');
             }
         }
@@ -147,8 +148,8 @@ class PUPI_SRS_Admin
             if (!empty($fields)) {
                 $fields = [
                         $keyServiceName . '-title' => [
-                            'label' => sprintf('<h3>%s</h3>', $service->getName()),
                             'type' => 'static',
+                            'label' => sprintf('<h3>%s</h3>', $service->getName()),
                         ],
                     ] + $fields;
             }
@@ -159,9 +160,17 @@ class PUPI_SRS_Admin
         $html .= $this->getServicesTable($onlineUsersValidatorStats['providers'], qa_lang_html('pupi_srs/admin_online_stats_title'));
 
         $result['admin_settings'] = [
-            'style' => 'tall',
             'type' => 'custom',
+            'style' => 'tall',
             'html' => $html,
+        ];
+
+        $result['unblock_users'] = [
+            'type' => 'text',
+            'tags' => 'name="pupi_srs_unblock_email_addresses"',
+            'style' => 'tall',
+            'label' => qa_lang_html('pupi_srs/admin_unblock_email_addresses_label'),
+            'note' => qa_lang_html('pupi_srs/admin_unblock_email_addresses_note'),
         ];
 
         return $result;
@@ -174,4 +183,32 @@ class PUPI_SRS_Admin
         }
     }
 
+    private function unblockEmailAddresses()
+    {
+        require_once $this->directory . 'Services/PUPI_SRS_EmailValidatorManager.php';
+
+        $emailsString = qa_post_text('pupi_srs_unblock_email_addresses');
+
+        // Remove spaces
+        $emailsString = preg_replace('/\s+/', '', $emailsString);
+
+        $emails = explode(';', $emailsString);
+
+        $emailsToUnblock = [];
+        foreach ($emails as $email) {
+            if (empty($email)) {
+                continue;
+            }
+
+            $verificationResult = (new PUPI_SRS_EmailValidatorManager($this->directory))->getVerificationResult($email);
+            if ($verificationResult['status'] === 'service-duplicate') {
+                $emailsToUnblock[] = $verificationResult['registeredEmail'];
+            }
+
+        }
+
+        require_once $this->directory . 'Models/PUPI_SRS_StandarizedEmailsModel.php';
+        $standarizedEmailsModel = new PUPI_SRS_StandarizedEmailsModel();
+        $standarizedEmailsModel->deleteEmails($emailsToUnblock);
+    }
 }

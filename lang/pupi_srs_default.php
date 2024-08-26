@@ -8,6 +8,8 @@ return [
     'admin_services_stats_previous_months' => 'Previously',
     'admin_services_stats_number_of_tests' => 'Tests count',
     'admin_services_stats_number_of_spam_users' => 'Spam users',
+    'admin_unblock_email_addresses_label' => 'Unblock email addresses:',
+    'admin_unblock_email_addresses_note' => 'Saving options will trigger the unblocking. Separate multiple address with a semi-colon. E.G.: marian@gmail.com;martin@gmail.com',
 
     'admin_reset_all_stats_button' => 'Reset all stats',
     'admin_reset_all_stats_button_confirmation' => 'Do you really want to delete all stats?',
