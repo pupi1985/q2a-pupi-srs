@@ -21,6 +21,7 @@ Features
  * Rejects registrations with duplicate emails
  * Rejects registrations with trash emails
  * Statistics for the last months are tracked for each service 
+ * Option to unblock email addresses
  * Internationalization support
  * No need for core hacks or plugin overrides
  * Simple installation
