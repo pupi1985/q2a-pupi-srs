@@ -12,7 +12,6 @@ Features
  * Prevents potential SPAM user registrations (users do not need to be removed as they are not even created)
  * SPAM users are tested against well-known services
    * [BotScout](https://botscout.com)
-   * [FSpamlist](https://fspamlist.com)
    * [IsTempMail](https://www.istempmail.com)
    * [ProjectHoneyPot](https://www.projecthoneypot.org)
    * [StopForumSpam](https://www.stopforumspam.com)
